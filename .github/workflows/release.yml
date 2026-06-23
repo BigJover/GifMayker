@@ -1,0 +1,58 @@
+name: Build & Release
+
+# Push a version tag (e.g. v0.1.20) to build all installers and publish a
+# GitHub Release with them attached. Each OS/arch builds on its own native
+# runner, so ffmpeg-static downloads the correct binary automatically.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:   # also runnable manually from the Actions tab (builds only)
+
+permissions:
+  contents: write       # needed to create the Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14        # Apple Silicon (arm64)
+            args: --mac --arm64
+          - os: macos-13        # Intel (x64)
+            args: --mac --x64
+          - os: windows-latest  # Windows (x64)
+            args: --win --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Build installer
+        run: npx electron-builder ${{ matrix.args }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false   # unsigned; afterPack ad-hoc signs mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+          if-no-files-found: ignore
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

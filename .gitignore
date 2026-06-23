@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+
+# Secrets — NEVER commit these (repo is public). Keep keys in .env (loaded at
+# runtime) or in GitHub Actions Secrets for CI. .env.example may be committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.keystore
+secrets.json
+.npmcache/

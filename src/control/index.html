@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <title>GifMayker</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #13100b;
+      color: #ffffff;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 26px 22px 18px;
+      user-select: none;
+    }
+    h1 { font-size: 18px; margin: 0 0 3px; font-weight: 650; }
+    .tag { font-size: 12px; color: #ab9c78; margin: 0 0 20px; text-align: center; }
+    .panel { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+    .row {
+      width: 100%; padding: 13px 14px; border-radius: 12px;
+      border: 1px solid #3a3020; background: #211a11;
+      display: flex; align-items: center; gap: 11px; transition: background .12s, border-color .12s;
+    }
+    .row .emoji { font-size: 18px; }
+    .row .name { font-size: 14px; font-weight: 550; }
+    .row .sub { font-size: 11px; color: #9a8c66; margin-top: 1px; }
+    .row .meta { display: flex; flex-direction: column; }
+    .row .spacer { margin-left: auto; }
+    .chip {
+      font-size: 11.5px; color: #e7cf8c; background: #2c2110;
+      border: 1px solid #4e3c1a; border-radius: 7px; padding: 4px 9px;
+      cursor: pointer; white-space: nowrap;
+    }
+    .chip:hover { border-color: #8c6f2e; }
+    .chip.listening { color: #fde68a; background: #2a2410; border-color: #6b5a18; }
+    .go {
+      font-size: 12px; color: #bdad84; background: #271f12; border: 1px solid #473a22;
+      border-radius: 8px; padding: 7px 11px; cursor: pointer;
+    }
+    .go:hover { background: #473a22; color: #ffffff; }
+    .row.flash { background: #241d12; border-color: #8c6f2e; }
+    .hint { font-size: 10.5px; color: #7c7050; margin: 12px 2px 0; text-align: center; line-height: 1.5; }
+    .status { margin-top: auto; font-size: 11px; color: #9a8c66; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      background: #34d399; margin-right: 6px; vertical-align: middle; }
+    .dot.warn { background: #f59e0b; }
+  </style>
+</head>
+<body>
+  <h1>GifMayker</h1>
+  <p class="tag">Capture anything → make a GIF → paste it anywhere.</p>
+
+  <div class="panel">
+    <div class="row" id="row-capture">
+      <span class="emoji">🎬</span>
+      <span class="meta"><span class="name">Capture</span><span class="sub">Record screen → GIF</span></span>
+      <span class="spacer"></span>
+      <span class="chip" data-action="capture" id="chip-capture">…</span>
+      <span class="go" data-action="capture">Open</span>
+    </div>
+    <div class="row" id="row-soundboard">
+      <span class="emoji">🔲</span>
+      <span class="meta"><span class="name">GifBoard</span><span class="sub">Favorite GIFs, one click to copy</span></span>
+      <span class="spacer"></span>
+      <span class="chip" data-action="soundboard" id="chip-soundboard">…</span>
+      <span class="go" data-action="soundboard">Open</span>
+    </div>
+  </div>
+
+  <p class="hint">Click a key chip, then press a new shortcut to rebind it.<br>Hotkeys work even when another app is focused.</p>
+
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">Running in the menu bar</span> · <span id="ver">v…</span></div>
+
+  <script src="control.js"></script>
+</body>
+</html>

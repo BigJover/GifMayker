@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; media-src 'self' blob:;" />
+  <title>Capture</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #13100b; color: #ffffff; height: 100vh; display: flex; flex-direction: column;
+      user-select: none;
+    }
+    header { padding: 16px 20px 12px; border-bottom: 1px solid #2a2316; display: flex; align-items: center; gap: 10px; }
+    header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+    .hbtn { background: #271f12; border: 1px solid #473a22; color: #ffffff; border-radius: 8px;
+      width: 30px; height: 28px; font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .hbtn:hover { border-color: #8c6f2e; }
+    header .step { margin-left: auto; font-size: 11.5px; color: #9a8c66; }
+    main { flex: 1; overflow: auto; padding: 16px 20px; }
+
+    /* permission banner */
+    .perm { background: #2a2410; border: 1px solid #6b5a18; color: #fde68a;
+      padding: 12px 14px; border-radius: 10px; font-size: 12.5px; margin-bottom: 14px; display: none; }
+    .perm.show { display: block; }
+    .perm button { margin-top: 8px; font-size: 12px; background: #4a3f12; color: #fde68a;
+      border: 1px solid #6b5a18; border-radius: 7px; padding: 6px 11px; cursor: pointer; }
+
+    /* source grid */
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+    .src { border: 1px solid #3a3020; background: #1d1710; border-radius: 11px; overflow: hidden; cursor: pointer; transition: border-color .12s, transform .08s; }
+    .src:hover { border-color: #8c6f2e; }
+    .src.selected { border-color: #d4af37; box-shadow: 0 0 0 1px #d4af37; }
+    .src .thumb { width: 100%; aspect-ratio: 16/10; background: #0b0805 center/cover no-repeat; display: block; }
+    .src .cap { padding: 8px 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+    .src .cap .tagdot { width: 7px; height: 7px; border-radius: 50%; background: #c98a3a; flex: none; }
+    .src .cap .tagdot.win { background: #d4af37; }
+    .src .cap span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* recording / preview */
+    .stage { display: none; flex-direction: column; align-items: center; gap: 14px; }
+    .stage.show { display: flex; }
+    video { width: 100%; max-width: 620px; border-radius: 12px; background: #000; border: 1px solid #3a3020; }
+    .gifwrap { width: 100%; max-width: 620px; display: none; flex-direction: column; gap: 6px; }
+    .gifwrap.show { display: flex; }
+    .gifwrap img { width: 100%; border-radius: 12px; background: #000; border: 1px solid #d4af37;
+      /* the checkerboard reveals GIF transparency, like image editors do */
+      background-image:
+        linear-gradient(45deg,#241d12 25%,transparent 25%), linear-gradient(-45deg,#241d12 25%,transparent 25%),
+        linear-gradient(45deg,transparent 75%,#241d12 75%), linear-gradient(-45deg,transparent 75%,#241d12 75%);
+      background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+    .gifwrap .lbl { font-size: 11px; color: #e7cf8c; text-align: center; letter-spacing: .3px; }
+    .timer { font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 600; letter-spacing: 1px; }
+    .timer .max { font-size: 13px; color: #9a8c66; font-weight: 400; }
+    .bar { width: 100%; max-width: 620px; height: 6px; background: #2a2316; border-radius: 4px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg,#d4af37,#b5362c); }
+    .saved { font-size: 12.5px; color: #d4af37; text-align: center; }
+    .saved code { color: #bdad84; font-size: 11px; }
+    .copywrap { position: relative; display: none; align-items: stretch; }
+    .copywrap.show { display: inline-flex; }
+    .copybtn { background: #c39a2c; border: 1px solid #c39a2c; color: #1a1407;
+      font-weight: 700; font-size: 14px; border-radius: 10px 0 0 10px; padding: 11px 18px; cursor: pointer; }
+    .copybtn:hover { background: #d4af37; }
+    .copybtn.done { background: #a37f1c; }
+    .copycaret { background: #c39a2c; border: 1px solid #c39a2c; border-left: 1px solid #9a7a1c; color: #1a1407;
+      font-size: 12px; border-radius: 0 10px 10px 0; padding: 0 11px; cursor: pointer; }
+    .copycaret:hover { background: #d4af37; }
+    .copymenu { position: absolute; bottom: calc(100% + 6px); left: 0; min-width: 190px;
+      background: #211a11; border: 1px solid #473a22; border-radius: 10px; padding: 5px;
+      display: none; box-shadow: 0 -8px 26px rgba(0,0,0,.45); z-index: 10; }
+    .copymenu.show { display: block; }
+    .cmi { display: block; width: 100%; text-align: left; background: transparent; border: none;
+      color: #ffffff; font-size: 12.5px; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+    .cmi:hover { background: #2e2614; }
+
+    footer { padding: 14px 20px; border-top: 1px solid #2a2316; display: flex; gap: 10px; align-items: center; }
+    .btn { font-size: 13px; border-radius: 9px; padding: 10px 16px; cursor: pointer; border: 1px solid #473a22; background: #271f12; color: #ffffff; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn.primary { background: #d4af37; border-color: #d4af37; color: #1a1407; font-weight: 700; }
+    .btn.primary:disabled { background: #4e3c1a; border-color: #4e3c1a; color: #9c8a5e; }
+    .btn.danger { background: #b5362c; border-color: #b5362c; color: #fff; font-weight: 600; }
+    .btn.ghost { background: transparent; }
+    footer .spacer { margin-left: auto; }
+    .muted { font-size: 11.5px; color: #9a8c66; }
+    .sel { font-size: 12px; background: #1d1710; color: #ffffff; border: 1px solid #473a22;
+      border-radius: 8px; padding: 8px 9px; cursor: pointer; }
+    .sel:hover { border-color: #8c6f2e; }
+    .gifopts { display: none; gap: 8px; align-items: center; }
+    .gifopts.show { display: flex; }
+
+    /* save-location bar */
+    .savebar { padding: 8px 20px; display: flex; align-items: center; gap: 8px;
+      border-bottom: 1px solid #2a2316; font-size: 11.5px; color: #ab9c78; }
+    .savebar .dir { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bdad84; }
+    .mini { font-size: 11px; color: #e7cf8c; background: #2c2110; border: 1px solid #4e3c1a;
+      border-radius: 7px; padding: 4px 9px; cursor: pointer; white-space: nowrap; }
+    .mini:hover { border-color: #8c6f2e; }
+
+    /* crop overlay */
+    .viewport { position: relative; width: 100%; max-width: 620px; line-height: 0; }
+    .viewport video { display: block; width: 100%; border-radius: 12px; }
+    .cropbox { position: absolute; box-sizing: border-box; border: 2px solid #d4af37;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,.5); display: none; cursor: move; }
+    .cropbox.show { display: block; }
+    .cropbox .grip { position: absolute; width: 14px; height: 14px; background: #d4af37;
+      border: 2px solid #13100b; border-radius: 4px; }
+    .cropbox .grip.nw { left: -8px; top: -8px; cursor: nwse-resize; }
+    .cropbox .grip.ne { right: -8px; top: -8px; cursor: nesw-resize; }
+    .cropbox .grip.sw { left: -8px; bottom: -8px; cursor: nesw-resize; }
+    .cropbox .grip.se { right: -8px; bottom: -8px; cursor: nwse-resize; }
+    .cropbox .grip.n { left: 50%; top: -8px; transform: translateX(-50%); cursor: ns-resize; }
+    .cropbox .grip.s { left: 50%; bottom: -8px; transform: translateX(-50%); cursor: ns-resize; }
+    .cropbox .grip.e { right: -8px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+    .cropbox .grip.w { left: -8px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+
+    /* trim + tools */
+    .tools { width: 100%; max-width: 620px; display: none; flex-direction: column; gap: 12px; }
+    .tools.show { display: flex; }
+    .toolrow { display: flex; gap: 8px; align-items: center; }
+    .tbtn { font-size: 12px; background: #271f12; color: #ffffff; border: 1px solid #473a22;
+      border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+    .tbtn:hover { border-color: #8c6f2e; }
+    .tbtn.on { color: #e7cf8c; background: #2c2110; border-color: #4e3c1a; }
+    .toolrow .tip { font-size: 11px; color: #9a8c66; }
+    .trimbar { position: relative; height: 26px; }
+    .trimtrack { position: absolute; top: 11px; left: 0; right: 0; height: 4px; background: #2a2316; border-radius: 2px; }
+    .trimsel { position: absolute; top: 11px; height: 4px; background: #d4af37; border-radius: 2px; }
+    .trimbar input[type=range] { position: absolute; top: 0; left: 0; width: 100%; height: 26px;
+      margin: 0; background: none; -webkit-appearance: none; pointer-events: none; }
+    .trimbar input[type=range]::-webkit-slider-runnable-track { background: transparent; height: 26px; }
+    .trimbar input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto;
+      width: 13px; height: 22px; margin-top: 2px; border-radius: 4px; background: #ffffff; border: 1px solid #d4af37; cursor: ew-resize; }
+    .trimlbl { display: flex; justify-content: space-between; font-size: 11px; color: #ab9c78;
+      font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .trimlbl .mid { color: #e7cf8c; }
+  </style>
+</head>
+<body>
+  <header>
+    <button class="hbtn" id="homeBtn" title="Back to menu">←</button>
+    <span style="font-size:16px">🎬</span>
+    <h1>Capture</h1>
+    <span class="step" id="step">Pick a source</span>
+  </header>
+
+  <div class="savebar">
+    <span>📁</span>
+    <span class="dir" id="saveDir" title="">…</span>
+    <span class="mini" id="changeDirBtn">Change…</span>
+    <span class="mini" id="openDirBtn">Open</span>
+  </div>
+
+  <main>
+    <div class="perm" id="perm">
+      <strong>Screen Recording permission needed.</strong>
+      <div>macOS must allow this app to record the screen. Enable it, then reopen this window.</div>
+      <button id="permBtn">Open System Settings →</button>
+    </div>
+
+    <div class="grid" id="grid"><div class="muted">Loading sources…</div></div>
+
+    <div class="stage" id="stage">
+      <div class="timer" id="timer">0:00 <span class="max">/ 1:00 max</span></div>
+      <div class="bar"><i id="barfill"></i></div>
+      <div class="tools" id="tools">
+        <div class="toolrow">
+          <button class="tbtn" id="cropToggle">▢ Crop: Off</button>
+          <select class="sel" id="cropAspect" title="Crop aspect ratio" disabled>
+            <option value="free">Free form</option>
+            <option value="1:1">1:1 square</option>
+            <option value="4:3">4:3</option>
+            <option value="3:4">3:4</option>
+            <option value="16:9">16:9</option>
+            <option value="9:16">9:16</option>
+          </select>
+          <button class="tbtn" id="cropReset" style="display:none">Reset</button>
+          <span class="tip">Trim &amp; crop apply to the source video below ↓</span>
+        </div>
+        <div class="trim">
+          <div class="trimbar">
+            <div class="trimtrack"></div>
+            <div class="trimsel" id="trimsel"></div>
+            <input type="range" id="trimStart" min="0" max="1000" value="0" step="1" />
+            <input type="range" id="trimEnd" min="0" max="1000" value="1000" step="1" />
+          </div>
+          <div class="trimlbl">
+            <span id="tStart">0:00.0</span>
+            <span id="tDur" class="mid">full clip</span>
+            <span id="tEnd">0:00.0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="viewport" id="viewport">
+        <video id="preview" autoplay muted playsinline></video>
+        <div class="cropbox" id="cropbox">
+          <span class="grip nw" data-corner="nw"></span>
+          <span class="grip ne" data-corner="ne"></span>
+          <span class="grip sw" data-corner="sw"></span>
+          <span class="grip se" data-corner="se"></span>
+          <span class="grip n" data-corner="n"></span>
+          <span class="grip s" data-corner="s"></span>
+          <span class="grip e" data-corner="e"></span>
+          <span class="grip w" data-corner="w"></span>
+        </div>
+      </div>
+
+      <div class="gifwrap" id="gifwrap">
+        <span class="lbl">▶ Live GIF preview (output)</span>
+        <img id="gifPreview" alt="GIF preview" />
+      </div>
+      <div class="saved" id="saved" style="display:none"></div>
+      <div class="saved" id="gifout" style="display:none"></div>
+    </div>
+  </main>
+
+  <footer>
+    <span class="copywrap" id="copyWrap">
+      <button class="copybtn" id="gifCopy">📋 GIF ready to copy</button>
+      <button class="copycaret" id="gifMore" title="More actions">▾</button>
+      <div class="copymenu" id="copyMenu">
+        <button class="cmi" id="miPin">📌 Pin to soundboard</button>
+        <button class="cmi" id="miOpen">Open GIF</button>
+        <button class="cmi" id="miReveal">Open file location</button>
+      </div>
+    </span>
+    <span class="muted" id="hint">Choose a screen or window to record.</span>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="backBtn" style="display:none">↺ New capture</button>
+    <span class="gifopts" id="gifopts">
+      <select class="sel" id="gifSize" title="Output width">
+        <option value="144">144p</option>
+        <option value="240">240p</option>
+        <option value="360">360p</option>
+        <option value="480" selected>480px</option>
+        <option value="640">640px</option>
+        <option value="orig">Original</option>
+      </select>
+      <select class="sel" id="gifFps" title="Frames per second">
+        <option value="2.5">2.5 fps</option>
+        <option value="5">5 fps</option>
+        <option value="10">10 fps</option>
+        <option value="15" selected>15 fps</option>
+        <option value="20">20 fps</option>
+      </select>
+      <select class="sel" id="gifSpeed" title="Playback speed">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="0.75">0.75×</option>
+        <option value="1" selected>1× speed</option>
+        <option value="1.5">1.5×</option>
+        <option value="2">2×</option>
+        <option value="3">3×</option>
+        <option value="4">4×</option>
+        <option value="5">5×</option>
+      </select>
+      <span class="muted" id="estSize" title="Rough estimate — actual size depends on motion"></span>
+    </span>
+    <button class="btn primary" id="recBtn" disabled>● Record</button>
+    <button class="btn danger" id="stopBtn" style="display:none">■ Stop</button>
+    <button class="btn primary" id="gifBtn" style="display:none">Make GIF</button>
+  </footer>
+
+  <script src="capture.js"></script>
+</body>
+</html>
