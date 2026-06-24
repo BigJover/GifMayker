@@ -367,6 +367,35 @@ ipcMain.handle('sb/remove', (_e, id) => {
   return sbList();
 });
 
+// Delete a GIF from the captures folder (to Trash) and unpin it if on the board.
+ipcMain.handle('captures/delete-gif', async (_e, file) => {
+  try {
+    if (file && file.toLowerCase().endsWith('.gif') && path.dirname(file) === capturesDir() && fs.existsSync(file)) {
+      await shell.trashItem(file);
+    } else {
+      return { ok: false, error: 'not a captures GIF', items: sbList() };
+    }
+  } catch (e) {
+    return { ok: false, error: e.message, items: sbList() };
+  }
+  const store = library.load();
+  const before = store.items.length;
+  store.items = store.items.filter((it) => it.path !== file);
+  if (store.items.length !== before) library.save(store);
+  return { ok: true, items: sbList() };
+});
+
+// Auto-cleanup of the raw .webm once a capture session is finished.
+ipcMain.handle('capture/delete-source', (_e, file) => {
+  try {
+    if (file && file.toLowerCase().endsWith('.webm') && path.dirname(file) === capturesDir() && fs.existsSync(file)) {
+      fs.rmSync(file, { force: true });
+      return { ok: true };
+    }
+  } catch (e) { return { ok: false, error: e.message }; }
+  return { ok: false };
+});
+
 // In-app "From Captures": list the GIFs in the captures folder (newest first).
 ipcMain.handle('captures/list-gifs', () => {
   const dir = capturesDir();

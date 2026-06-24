@@ -231,6 +231,8 @@ async function makeGif() {
 }
 
 function resetToPicker() {
+  // Clean up the raw .webm from the previous capture (the GIF is what's kept).
+  if (lastSavedPath && /\.webm$/i.test(lastSavedPath)) window.gifApp.deleteSource(lastSavedPath);
   selected = null;
   lastSavedBlob = null;
   lastSavedPath = null;
@@ -615,7 +617,10 @@ function loadClip(file) {
 window.gifApp.onLoadClip(loadClip);
 
 // ---- wire buttons ----
-$('homeBtn').addEventListener('click', () => window.gifApp.closeCapture());
+$('homeBtn').addEventListener('click', () => {
+  if (lastSavedPath && /\.webm$/i.test(lastSavedPath)) window.gifApp.deleteSource(lastSavedPath);
+  window.gifApp.closeCapture();
+});
 $('recBtn').addEventListener('click', startRecording);
 $('stopBtn').addEventListener('click', stopRecording);
 $('backBtn').addEventListener('click', resetToPicker);

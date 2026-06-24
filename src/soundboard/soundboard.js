@@ -82,7 +82,9 @@ async function openCapturePicker() {
       el.innerHTML =
         `<span class="thumb"><img src="${fileURL(g.path)}" alt="" draggable="false" />` +
         `<span class="veil">${added ? 'On board' : 'Add'}</span></span>` +
+        `<span class="rm" title="Delete from captures (to Trash)">×</span>` +
         `<div class="cap" title="${escapeHtml(g.name)}">${escapeHtml(g.name)}</div>`;
+      el.querySelector('.rm').addEventListener('click', (e) => { e.stopPropagation(); deleteCapture(el, g.path); });
       if (!added) el.addEventListener('click', () => addFromPicker(el, g.path));
       grid.appendChild(el);
     }
@@ -96,6 +98,14 @@ async function addFromPicker(el, p) {
   el.classList.add('added');
   const veil = el.querySelector('.veil');
   if (veil) veil.textContent = 'Added ✓';
+}
+
+async function deleteCapture(el, p) {
+  const r = await window.gifApp.deleteCaptureGif(p);
+  if (r && r.ok) {
+    el.remove();
+    if (r.items) { items = r.items; render(); } // also unpinned if it was on the board
+  }
 }
 
 async function removeItem(id) {
