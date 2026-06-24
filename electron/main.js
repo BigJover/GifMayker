@@ -143,13 +143,16 @@ async function armReplay() {
     },
   });
   await bufferWin.loadFile(path.join(__dirname, '..', 'src', 'buffer', 'index.html'));
-  // Grab the primary screen as the source to continuously buffer.
+  // Pick the chosen monitor (or the first) to continuously buffer.
+  const { replay } = settings.load();
   let srcId = null;
   try {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
-    if (sources.length) srcId = sources[0].id;
+    let chosen = null;
+    if (replay.displayId) chosen = sources.find((s) => String(s.display_id) === String(replay.displayId));
+    chosen = chosen || sources[0];
+    if (chosen) srcId = chosen.id;
   } catch (e) { console.error('[replay] getSources failed:', e.message); }
-  const { replay } = settings.load();
   bufferWin.webContents.send('replay/start', { sourceId: srcId, seconds: replay.seconds });
 }
 
@@ -429,6 +432,22 @@ ipcMain.handle('replay/error', (_e, msg) => {
 });
 
 ipcMain.handle('replay/get', () => settings.load().replay);
+
+// List available monitors for the replay settings dropdown.
+ipcMain.handle('replay/list-screens', async () => {
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    return sources.map((s, i) => ({ displayId: s.display_id, name: s.name || `Display ${i + 1}` }));
+  } catch { return []; }
+});
+
+ipcMain.handle('replay/set-screen', async (_e, displayId) => {
+  const cfg = settings.load();
+  cfg.replay.displayId = displayId || null;
+  settings.save(cfg);
+  if (cfg.replay.enabled) { disarmReplay(); await armReplay(); } // re-arm on the new monitor
+  return cfg.replay;
+});
 
 ipcMain.handle('replay/set-enabled', async (_e, on) => {
   const cfg = settings.load();

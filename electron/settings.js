@@ -17,6 +17,7 @@ const DEFAULTS = {
   replay: {
     enabled: false,
     seconds: 30,
+    displayId: null, // which monitor to record; null = primary/first
   },
 };
 

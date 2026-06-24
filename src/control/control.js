@@ -37,7 +37,25 @@ async function refreshReplay() {
   try { applyReplayState(await window.gifApp.getReplay()); } catch { /* ignore */ }
 }
 
-$('replayGear').addEventListener('click', () => $('replayModal').classList.add('show'));
+async function populateScreens() {
+  const sel = $('replayScreen');
+  try {
+    const screens = await window.gifApp.listScreens();
+    const cur = (await window.gifApp.getReplay()).displayId;
+    sel.innerHTML = '';
+    if (!screens.length) { sel.innerHTML = '<option>Default</option>'; return; }
+    screens.forEach((s, i) => {
+      const o = document.createElement('option');
+      o.value = s.displayId == null ? '' : String(s.displayId);
+      o.textContent = s.name;
+      if ((cur == null && i === 0) || String(s.displayId) === String(cur)) o.selected = true;
+      sel.appendChild(o);
+    });
+  } catch { sel.innerHTML = '<option>Default</option>'; }
+}
+$('replayScreen').addEventListener('change', () => window.gifApp.setReplayScreen($('replayScreen').value || null));
+
+$('replayGear').addEventListener('click', () => { $('replayModal').classList.add('show'); populateScreens(); });
 $('replayClose').addEventListener('click', () => $('replayModal').classList.remove('show'));
 $('replayModal').addEventListener('click', (e) => { if (e.target === $('replayModal')) $('replayModal').classList.remove('show'); });
 
