@@ -1,8 +1,11 @@
 name: Build & Release
 
-# Push a version tag (e.g. v0.1.20) to build all installers and publish a
-# GitHub Release with them attached. Each OS/arch builds on its own native
-# runner, so ffmpeg-static downloads the correct binary automatically.
+# Push a version tag (e.g. v0.1.21) to build the installers and publish a
+# GitHub Release with them attached.
+#   - macOS: a single UNIVERSAL .dmg (Intel + Apple Silicon) built on the
+#     Apple-Silicon runner, with a lipo-merged universal ffmpeg so conversion
+#     works on both archs. (Avoids the flaky/retiring macos-13 Intel runner.)
+#   - Windows: x64 .exe.
 on:
   push:
     tags: ['v*']
@@ -17,12 +20,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14        # Apple Silicon (arm64)
-            args: --mac --arm64
-          - os: macos-13        # Intel (x64)
-            args: --mac --x64
+          - os: macos-14        # Apple Silicon runner; builds the universal mac app
+            kind: mac
           - os: windows-latest  # Windows (x64)
-            args: --win --x64
+            kind: win
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -30,10 +31,31 @@ jobs:
         with:
           node-version: 20
       - run: npm install
-      - name: Build installer
-        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      # ffmpeg-static only fetches the host arch (arm64). For a universal mac
+      # app we also need x64 and lipo them into one fat binary.
+      - name: Build universal ffmpeg
+        if: matrix.kind == 'mac'
+        run: |
+          ARM=node_modules/ffmpeg-static/ffmpeg
+          cp "$ARM" /tmp/ffmpeg-arm64
+          rm "$ARM"
+          npm_config_arch=x64 node node_modules/ffmpeg-static/install.js
+          cp "$ARM" /tmp/ffmpeg-x64
+          lipo -create /tmp/ffmpeg-arm64 /tmp/ffmpeg-x64 -output "$ARM"
+          chmod +x "$ARM"
+          lipo -info "$ARM"
+
+      - name: Build macOS (universal)
+        if: matrix.kind == 'mac'
+        run: npx electron-builder --mac --universal --publish never
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false   # unsigned; afterPack ad-hoc signs mac
+          CSC_IDENTITY_AUTO_DISCOVERY: false   # unsigned; afterPack ad-hoc signs
+
+      - name: Build Windows (x64)
+        if: matrix.kind == 'win'
+        run: npx electron-builder --win --x64 --publish never
+
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.os }}

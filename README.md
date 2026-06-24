@@ -25,10 +25,9 @@ Grab the file for your system from the [**Releases**](../../releases/latest) pag
 | Your machine | Download |
 |---|---|
 | **Windows** | `GifMayker-<version>-win-x64.exe` |
-| **Mac — Apple Silicon** (M1/M2/M3…) | `GifMayker-<version>-mac-arm64.dmg` |
-| **Mac — Intel** | `GifMayker-<version>-mac-x64.dmg` |
+| **Mac** (Intel *and* Apple Silicon) | `GifMayker-<version>-mac-universal.dmg` |
 
-> Not sure which Mac you have?  → **About This Mac**. "Apple M…" = Apple Silicon; "Intel" = Intel.
+> The Mac build is **universal** — the one `.dmg` runs on both Intel and Apple Silicon.
 
 ### First-launch notes (the app is unsigned)
 - **Windows:** SmartScreen may say "Windows protected your PC" → **More info** → **Run anyway**.
