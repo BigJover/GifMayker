@@ -23,7 +23,10 @@ let bufferWin = null;   // hidden window running the instant-replay rolling buff
 
 const capturesDir = () => {
   const { saveDir } = settings.load();
-  const dir = saveDir || path.join(app.getPath('userData'), 'captures');
+  // Default to a clean, visible folder (~/Movies/GifMayker) instead of the
+  // buried app-data dir — so it's easy to find and the file picker opens
+  // straight to it, like Downloads does.
+  const dir = saveDir || path.join(app.getPath('videos'), 'GifMayker');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 };
