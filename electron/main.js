@@ -318,9 +318,12 @@ ipcMain.handle('sb/list', () => sbList());
 
 ipcMain.handle('sb/import', async (_e, opts = {}) => {
   const win = BrowserWindow.fromWebContents(_e.sender);
+  // Trailing separator makes macOS open *inside* the folder (showing its files)
+  // instead of selecting it in the parent.
+  const startDir = opts.fromCaptures ? capturesDir() + path.sep : app.getPath('downloads') + path.sep;
   const res = await dialog.showOpenDialog(win, {
     title: 'Add GIFs to your soundboard',
-    defaultPath: opts.fromCaptures ? capturesDir() : app.getPath('downloads'),
+    defaultPath: startDir,
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'GIF', extensions: ['gif'] }],
   });
