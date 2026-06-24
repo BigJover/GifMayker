@@ -23,26 +23,33 @@ async function refreshHotkeys() {
 }
 refreshHotkeys();
 
-// --- Instant Replay toggle ---
-async function refreshReplay() {
-  try {
-    const r = await window.gifApp.getReplay();
-    const t = $('replayToggle');
-    t.classList.toggle('on', !!r.enabled);
-    t.textContent = r.enabled ? 'On' : 'Off';
-    t.setAttribute('aria-pressed', r.enabled ? 'true' : 'false');
-  } catch { /* ignore */ }
-}
-$('replayToggle').addEventListener('click', async () => {
+// --- Instant Replay settings (gear → modal) ---
+function applyReplayState(r) {
   const t = $('replayToggle');
-  const turnOn = !t.classList.contains('on');
-  t.textContent = '…';
-  try {
-    const r = await window.gifApp.setReplayEnabled(turnOn);
-    t.classList.toggle('on', !!r.enabled);
-    t.textContent = r.enabled ? 'On' : 'Off';
-    t.setAttribute('aria-pressed', r.enabled ? 'true' : 'false');
-  } catch { refreshReplay(); }
+  t.classList.toggle('on', !!r.enabled);
+  t.textContent = r.enabled ? 'On' : 'Off';
+  t.setAttribute('aria-pressed', r.enabled ? 'true' : 'false');
+  $('replayGear').classList.toggle('on', !!r.enabled);
+  $('replaySeconds').value = String(r.seconds);
+  $('replaySub').textContent = `Always recording — save the last ${r.seconds}s`;
+}
+async function refreshReplay() {
+  try { applyReplayState(await window.gifApp.getReplay()); } catch { /* ignore */ }
+}
+
+$('replayGear').addEventListener('click', () => $('replayModal').classList.add('show'));
+$('replayClose').addEventListener('click', () => $('replayModal').classList.remove('show'));
+$('replayModal').addEventListener('click', (e) => { if (e.target === $('replayModal')) $('replayModal').classList.remove('show'); });
+
+$('replayToggle').addEventListener('click', async () => {
+  const turnOn = !$('replayToggle').classList.contains('on');
+  $('replayToggle').textContent = '…';
+  try { applyReplayState(await window.gifApp.setReplayEnabled(turnOn)); }
+  catch { refreshReplay(); }
+});
+$('replaySeconds').addEventListener('change', async () => {
+  try { applyReplayState(await window.gifApp.setReplaySeconds(Number($('replaySeconds').value))); }
+  catch { refreshReplay(); }
 });
 refreshReplay();
 

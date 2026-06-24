@@ -372,6 +372,14 @@ ipcMain.handle('replay/set-enabled', async (_e, on) => {
   return cfg.replay;
 });
 
+ipcMain.handle('replay/set-seconds', async (_e, secs) => {
+  const cfg = settings.load();
+  cfg.replay.seconds = Math.max(5, Math.min(60, Number(secs) || 30)); // 1-min cap
+  settings.save(cfg);
+  if (cfg.replay.enabled) { disarmReplay(); await armReplay(); } // re-arm with new length
+  return cfg.replay;
+});
+
 // The buffer window submits its kept segments; concat them into one clip and
 // open it in the Capture editor (trim/crop/GIF flow).
 ipcMain.handle('replay/submit', (_e, buffers) => {

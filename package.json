@@ -1,6 +1,6 @@
 {
   "name": "gifmayker",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "private": true,
   "description": "Make-your-own GIF tool — capture, trim, GIF, soundboard (desktop, Electron)",
   "main": "electron/main.js",
@@ -46,7 +46,10 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": "x64" }
+        {
+          "target": "nsis",
+          "arch": "x64"
+        }
       ],
       "artifactName": "GifMayker-${version}-win-x64.${ext}"
     },
