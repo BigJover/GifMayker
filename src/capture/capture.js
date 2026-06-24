@@ -200,9 +200,10 @@ async function makeGif() {
   $('copyWrap').classList.remove('show');
   $('copyMenu').classList.remove('show');
 
+  const outSeconds = effectiveDuration() / (speed || 1);
   let res;
   try {
-    res = await window.gifApp.toGif({ src: lastSavedPath, fps, width, trim, crop, speed });
+    res = await window.gifApp.toGif({ src: lastSavedPath, fps, width, trim, crop, speed, outSeconds });
   } catch (e) {
     res = { ok: false, error: e.message };
   }
@@ -625,6 +626,11 @@ $('recBtn').addEventListener('click', startRecording);
 $('stopBtn').addEventListener('click', stopRecording);
 $('backBtn').addEventListener('click', resetToPicker);
 $('gifBtn').addEventListener('click', makeGif);
+// Live conversion progress on the Make GIF button.
+window.gifApp.onGifProgress((pct) => {
+  const b = $('gifBtn');
+  if (b.disabled && b.textContent.startsWith('Converting')) b.textContent = `Converting… ${pct}%`;
+});
 $('gifCopy').addEventListener('click', async () => {
   if (!lastGifPath) return;
   const btn = $('gifCopy');

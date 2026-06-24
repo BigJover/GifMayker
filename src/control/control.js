@@ -1,7 +1,12 @@
 // Control panel logic: show version, render hotkeys, trigger actions, rebind keys.
 // Kept external so the page CSP can forbid inline scripts.
+//
+// ORDER MATTERS: the hotkey-rebind wiring is set up FIRST so that an error in
+// any later (optional) feature wiring can't abort the script before rebinding
+// is attached. Optional feature wiring is also null-guarded + try/caught.
 
 const $ = (id) => document.getElementById(id);
+const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
 // --- version ---
 (async () => {
@@ -9,12 +14,23 @@ const $ = (id) => document.getElementById(id);
   catch { $('ver').textContent = ''; }
 })();
 
+// Make accelerators read nicely (Command symbol on mac, words elsewhere).
+function pretty(accel) {
+  return String(accel || '')
+    .replace('CommandOrControl', IS_MAC ? '⌘' : 'Ctrl')
+    .replace('Command', '⌘').replace('Control', 'Ctrl')
+    .replace('Shift', IS_MAC ? '⇧' : 'Shift')
+    .replace('Alt', IS_MAC ? '⌥' : 'Alt')
+    .replace(/\+/g, IS_MAC ? ' ' : '+');
+}
+
 // --- render current hotkeys + registration status ---
 async function refreshHotkeys() {
   const { hotkeys, status } = await window.gifApp.getHotkeys();
-  $('chip-capture').textContent = pretty(hotkeys.capture);
-  $('chip-soundboard').textContent = pretty(hotkeys.soundboard);
-  $('chip-saveReplay').textContent = pretty(hotkeys.saveReplay);
+  const set = (id, v) => { const el = $(id); if (el) el.textContent = pretty(v); };
+  set('chip-capture', hotkeys.capture);
+  set('chip-soundboard', hotkeys.soundboard);
+  set('chip-saveReplay', hotkeys.saveReplay);
   const allOk = status.capture && status.soundboard && status.saveReplay;
   $('dot').className = 'dot' + (allOk ? '' : ' warn');
   $('statusText').textContent = allOk
@@ -23,71 +39,12 @@ async function refreshHotkeys() {
 }
 refreshHotkeys();
 
-// --- Instant Replay settings (gear → modal) ---
-function applyReplayState(r) {
-  const t = $('replayToggle');
-  t.classList.toggle('on', !!r.enabled);
-  t.textContent = r.enabled ? 'On' : 'Off';
-  t.setAttribute('aria-pressed', r.enabled ? 'true' : 'false');
-  $('replayGear').classList.toggle('on', !!r.enabled);
-  $('replaySeconds').value = String(r.seconds);
-  $('replaySub').textContent = `Always recording — save the last ${r.seconds}s`;
-}
-async function refreshReplay() {
-  try { applyReplayState(await window.gifApp.getReplay()); } catch { /* ignore */ }
-}
-
-async function populateScreens() {
-  const sel = $('replayScreen');
-  try {
-    const screens = await window.gifApp.listScreens();
-    const cur = (await window.gifApp.getReplay()).displayId;
-    sel.innerHTML = '';
-    if (!screens.length) { sel.innerHTML = '<option>Default</option>'; return; }
-    screens.forEach((s, i) => {
-      const o = document.createElement('option');
-      o.value = s.displayId == null ? '' : String(s.displayId);
-      o.textContent = s.name;
-      if ((cur == null && i === 0) || String(s.displayId) === String(cur)) o.selected = true;
-      sel.appendChild(o);
-    });
-  } catch { sel.innerHTML = '<option>Default</option>'; }
-}
-$('replayScreen').addEventListener('change', () => window.gifApp.setReplayScreen($('replayScreen').value || null));
-
-$('replayGear').addEventListener('click', () => { $('replayModal').classList.add('show'); populateScreens(); });
-$('replayClose').addEventListener('click', () => $('replayModal').classList.remove('show'));
-$('replayModal').addEventListener('click', (e) => { if (e.target === $('replayModal')) $('replayModal').classList.remove('show'); });
-
-$('replayToggle').addEventListener('click', async () => {
-  const turnOn = !$('replayToggle').classList.contains('on');
-  $('replayToggle').textContent = '…';
-  try { applyReplayState(await window.gifApp.setReplayEnabled(turnOn)); }
-  catch { refreshReplay(); }
-});
-$('replaySeconds').addEventListener('change', async () => {
-  try { applyReplayState(await window.gifApp.setReplaySeconds(Number($('replaySeconds').value))); }
-  catch { refreshReplay(); }
-});
-refreshReplay();
-
-// Make accelerators read nicely (Command symbol on mac, words elsewhere).
-const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
-function pretty(accel) {
-  return accel
-    .replace('CommandOrControl', IS_MAC ? '⌘' : 'Ctrl')
-    .replace('Command', '⌘').replace('Control', 'Ctrl')
-    .replace('Shift', IS_MAC ? '⇧' : 'Shift')
-    .replace('Alt', IS_MAC ? '⌥' : 'Alt')
-    .replace(/\+/g, IS_MAC ? ' ' : '+');
-}
-
 // --- trigger an action (same path the global hotkey uses) ---
 document.querySelectorAll('.go').forEach((btn) => {
   btn.addEventListener('click', () => window.gifApp.trigger(btn.dataset.action));
 });
 
-// --- flash a row when its action fires (from hotkey or button) ---
+// --- flash a row when its action fires ---
 window.gifApp.onActionFired((kind) => {
   const row = $('row-' + kind);
   if (!row) return;
@@ -95,7 +52,7 @@ window.gifApp.onActionFired((kind) => {
   setTimeout(() => row.classList.remove('flash'), 450);
 });
 
-// --- rebinding: click a chip, then press a combo ---
+// --- rebinding: click a chip, then press a combo (WIRED FIRST, can't be broken) ---
 let listening = null; // {action, chip} or null
 
 document.querySelectorAll('.chip').forEach((chip) => {
@@ -107,12 +64,15 @@ function startListening(chip) {
   listening = { action: chip.dataset.action, chip };
   chip.classList.add('listening');
   chip.textContent = 'press keys…';
+  // Suspend global shortcuts so the combo reaches this window instead of firing.
+  try { window.gifApp.suspendHotkeys(); } catch { /* ignore */ }
 }
 
 function stopListening() {
   if (!listening) return;
   listening.chip.classList.remove('listening');
   listening = null;
+  try { window.gifApp.resumeHotkeys(); } catch { /* ignore */ }
   refreshHotkeys();
 }
 
@@ -130,6 +90,7 @@ window.addEventListener('keydown', async (e) => {
   const res = await window.gifApp.setHotkey(action, accel);
   listening.chip.classList.remove('listening');
   listening = null;
+  try { window.gifApp.resumeHotkeys(); } catch { /* ignore */ }
   if (!res.ok) {
     chip.textContent = res.error === 'conflict' ? 'taken — try another' : 'failed';
     setTimeout(refreshHotkeys, 1100);
@@ -165,3 +126,52 @@ function keyName(e) {
   };
   return map[c] || null; // ignore bare modifier keys
 }
+
+// --- Instant Replay settings (gear → modal) — optional, fully guarded ---
+function applyReplayState(r) {
+  const t = $('replayToggle');
+  if (t) {
+    t.classList.toggle('on', !!r.enabled);
+    t.textContent = r.enabled ? 'On' : 'Off';
+    t.setAttribute('aria-pressed', r.enabled ? 'true' : 'false');
+  }
+  const gear = $('replayGear'); if (gear) gear.classList.toggle('on', !!r.enabled);
+  const secs = $('replaySeconds'); if (secs) secs.value = String(r.seconds);
+  const sub = $('replaySub'); if (sub) sub.textContent = `Always recording — save the last ${r.seconds}s`;
+}
+async function refreshReplay() {
+  try { applyReplayState(await window.gifApp.getReplay()); } catch { /* ignore */ }
+}
+async function populateScreens() {
+  const sel = $('replayScreen');
+  if (!sel) return;
+  try {
+    const screens = await window.gifApp.listScreens();
+    const cur = (await window.gifApp.getReplay()).displayId;
+    sel.innerHTML = '';
+    if (!screens.length) { sel.innerHTML = '<option>Default</option>'; return; }
+    screens.forEach((s, i) => {
+      const o = document.createElement('option');
+      o.value = s.displayId == null ? '' : String(s.displayId);
+      o.textContent = s.name;
+      if ((cur == null && i === 0) || String(s.displayId) === String(cur)) o.selected = true;
+      sel.appendChild(o);
+    });
+  } catch { sel.innerHTML = '<option>Default</option>'; }
+}
+
+try {
+  $('replayScreen')?.addEventListener('change', () => window.gifApp.setReplayScreen($('replayScreen').value || null));
+  $('replayGear')?.addEventListener('click', () => { $('replayModal')?.classList.add('show'); populateScreens(); });
+  $('replayClose')?.addEventListener('click', () => $('replayModal')?.classList.remove('show'));
+  $('replayModal')?.addEventListener('click', (e) => { if (e.target === $('replayModal')) $('replayModal').classList.remove('show'); });
+  $('replayToggle')?.addEventListener('click', async () => {
+    const turnOn = !$('replayToggle').classList.contains('on');
+    $('replayToggle').textContent = '…';
+    try { applyReplayState(await window.gifApp.setReplayEnabled(turnOn)); } catch { refreshReplay(); }
+  });
+  $('replaySeconds')?.addEventListener('change', async () => {
+    try { applyReplayState(await window.gifApp.setReplaySeconds(Number($('replaySeconds').value))); } catch { refreshReplay(); }
+  });
+  refreshReplay();
+} catch (e) { console.error('[control] replay wiring failed:', e); }

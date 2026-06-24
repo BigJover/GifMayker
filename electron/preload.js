@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('gifApp', {
   // Hotkeys
   getHotkeys: () => ipcRenderer.invoke('hotkeys/get'),
   setHotkey: (action, accelerator) => ipcRenderer.invoke('hotkeys/set', { action, accelerator }),
+  suspendHotkeys: () => ipcRenderer.invoke('hotkeys/suspend'),
+  resumeHotkeys: () => ipcRenderer.invoke('hotkeys/resume'),
 
   // Trigger an action from the UI (same path the hotkey uses)
   trigger: (kind) => ipcRenderer.invoke('action/trigger', kind),
@@ -57,6 +59,7 @@ contextBridge.exposeInMainWorld('gifApp', {
   },
   replayError: (msg) => ipcRenderer.invoke('replay/error', msg),
   toGif: (opts) => ipcRenderer.invoke('capture/to-gif', opts),
+  onGifProgress: (cb) => ipcRenderer.on('gif/progress', (_e, pct) => cb(pct)),
 
   // Save location
   getSaveDir: () => ipcRenderer.invoke('savedir/get'),

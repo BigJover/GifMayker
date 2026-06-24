@@ -269,6 +269,11 @@ ipcMain.handle('hotkeys/get', () => {
   };
 });
 
+// Temporarily release global shortcuts while the user is rebinding, so the
+// pressed combo reaches the control window instead of firing an action.
+ipcMain.handle('hotkeys/suspend', () => { globalShortcut.unregisterAll(); return true; });
+ipcMain.handle('hotkeys/resume', () => registerHotkeys());
+
 ipcMain.handle('hotkeys/set', (_e, { action, accelerator }) => {
   if (!['capture', 'soundboard', 'saveReplay'].includes(action) || !accelerator) {
     return { ok: false, error: 'bad request' };
@@ -575,7 +580,7 @@ function gifFilter(fps, width, crop, speed) {
     `;[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
 }
 
-ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null, crop = null, speed = 1 }) => {
+ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null, crop = null, speed = 1, outSeconds = 0 }) => {
   return new Promise((resolve) => {
     if (!src || !fs.existsSync(src)) { resolve({ ok: false, error: 'source file not found' }); return; }
     const out = src.replace(/\.webm$/i, '') + '.gif';
@@ -596,7 +601,18 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
       return;
     }
     let err = '';
-    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.stderr.on('data', (d) => {
+      const s = d.toString();
+      err += s;
+      // Parse ffmpeg "time=HH:MM:SS.ss" → progress % for live feedback.
+      if (outSeconds > 0 && !_e.sender.isDestroyed()) {
+        const m = s.match(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/);
+        if (m) {
+          const t = (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
+          _e.sender.send('gif/progress', Math.max(1, Math.min(99, Math.round((t / outSeconds) * 100))));
+        }
+      }
+    });
     proc.on('error', (e) => resolve({ ok: false, error: e.message }));
     proc.on('close', (code) => {
       if (code === 0 && fs.existsSync(out)) {
