@@ -219,6 +219,14 @@ function rebuildTrayMenu() {
 }
 
 app.whenReady().then(() => {
+  // Mac: minimal menu (keeps Cmd+Q + copy/paste, drops reload/devtools).
+  // Windows/Linux: no menu bar at all (also kills the Ctrl+R reload / F12
+  // devtools accelerators that could interfere with hotkey rebinding).
+  if (process.platform === 'darwin') {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }]));
+  } else {
+    Menu.setApplicationMenu(null);
+  }
   createTray();
   createControlWindow();
   const status = registerHotkeys();

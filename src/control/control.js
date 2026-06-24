@@ -88,14 +88,16 @@ window.addEventListener('keydown', async (e) => {
   const { action, chip } = listening;
   chip.textContent = 'saving…';
   const res = await window.gifApp.setHotkey(action, accel);
-  listening.chip.classList.remove('listening');
-  listening = null;
-  try { window.gifApp.resumeHotkeys(); } catch { /* ignore */ }
-  if (!res.ok) {
-    chip.textContent = res.error === 'conflict' ? 'taken — try another' : 'failed';
-    setTimeout(refreshHotkeys, 1100);
-  } else {
+  if (res.ok) {
+    listening.chip.classList.remove('listening');
+    listening = null;
+    try { window.gifApp.resumeHotkeys(); } catch { /* ignore */ }
     refreshHotkeys();
+  } else {
+    // Stay in listening mode so the user can immediately try another combo.
+    chip.textContent = res.error === 'conflict'
+      ? `${pretty(accel)} taken — try another`
+      : 'failed — try another';
   }
 });
 
@@ -109,7 +111,10 @@ function toAccelerator(e) {
 
   const key = keyName(e);
   if (!key) return null;            // modifier-only press → keep waiting
-  if (mods.length === 0) return null; // require at least one modifier (safer global key)
+  // Letters/digits need a modifier (a bare 'G' would hijack typing globally),
+  // but function keys are fine on their own — common for capture/replay tools.
+  const isFn = /^F([1-9]|1\d|2[0-4])$/.test(key);
+  if (mods.length === 0 && !isFn) return null;
   return [...mods, key].join('+');
 }
 
