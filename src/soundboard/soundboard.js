@@ -37,7 +37,7 @@ function render() {
   const add = document.createElement('div');
   add.className = 'tile add';
   add.innerHTML = `<span class="plus">+</span><span class="lbl">Add GIF</span>`;
-  add.addEventListener('click', () => importGifs(true));
+  add.addEventListener('click', openCapturePicker);
   grid.appendChild(add);
 
   $('count').textContent = `${items.length} GIF${items.length === 1 ? '' : 's'}`;
@@ -66,6 +66,38 @@ async function importGifs(fromCaptures) {
   }
 }
 
+// --- In-app "From Captures" picker: a grid of GIFs from the captures folder ---
+async function openCapturePicker() {
+  const { gifs } = await window.gifApp.listCaptureGifs();
+  const grid = $('capGrid');
+  grid.innerHTML = '';
+  if (!gifs.length) {
+    grid.innerHTML = '<div style="color:#9a8c66;font-size:12.5px;padding:24px 4px">No GIFs in your captures folder yet — make one in Capture first.</div>';
+  } else {
+    const onBoard = new Set(items.map((it) => it.path));
+    for (const g of gifs) {
+      const added = onBoard.has(g.path);
+      const el = document.createElement('div');
+      el.className = 'tile' + (added ? ' added' : '');
+      el.innerHTML =
+        `<span class="thumb"><img src="${fileURL(g.path)}" alt="" draggable="false" />` +
+        `<span class="veil">${added ? 'On board' : 'Add'}</span></span>` +
+        `<div class="cap" title="${escapeHtml(g.name)}">${escapeHtml(g.name)}</div>`;
+      if (!added) el.addEventListener('click', () => addFromPicker(el, g.path));
+      grid.appendChild(el);
+    }
+  }
+  $('capModal').classList.add('show');
+}
+
+async function addFromPicker(el, p) {
+  const r = await window.gifApp.sbAdd(p);
+  if (r && r.items) { items = r.items; render(); }
+  el.classList.add('added');
+  const veil = el.querySelector('.veil');
+  if (veil) veil.textContent = 'Added ✓';
+}
+
 async function removeItem(id) {
   items = await window.gifApp.sbRemove(id);
   render();
@@ -83,7 +115,9 @@ function escapeHtml(str) {
 // ---- wire controls ----
 $('homeBtn').addEventListener('click', () => window.gifApp.closeSoundboard());
 $('search').addEventListener('input', (e) => { query = e.target.value.trim().toLowerCase(); render(); });
-$('fromCapturesBtn').addEventListener('click', () => importGifs(true));
+$('fromCapturesBtn').addEventListener('click', openCapturePicker);
 $('importBtn').addEventListener('click', () => importGifs(false));
+$('capClose').addEventListener('click', () => $('capModal').classList.remove('show'));
+$('capModal').addEventListener('click', (e) => { if (e.target === $('capModal')) $('capModal').classList.remove('show'); });
 
 refresh();

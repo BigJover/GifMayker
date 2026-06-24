@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('gifApp', {
   sbImport: (opts) => ipcRenderer.invoke('sb/import', opts),
   sbAdd: (file) => ipcRenderer.invoke('sb/add', file),
   sbRemove: (id) => ipcRenderer.invoke('sb/remove', id),
+  listCaptureGifs: () => ipcRenderer.invoke('captures/list-gifs'),
 
   // Instant Replay (Phase 2)
   getReplay: () => ipcRenderer.invoke('replay/get'),

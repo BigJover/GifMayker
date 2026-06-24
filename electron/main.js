@@ -367,6 +367,19 @@ ipcMain.handle('sb/remove', (_e, id) => {
   return sbList();
 });
 
+// In-app "From Captures": list the GIFs in the captures folder (newest first).
+ipcMain.handle('captures/list-gifs', () => {
+  const dir = capturesDir();
+  let gifs = [];
+  try {
+    gifs = fs.readdirSync(dir)
+      .filter((f) => f.toLowerCase().endsWith('.gif'))
+      .map((f) => { const p = path.join(dir, f); return { path: p, name: f, mtime: fs.statSync(p).mtimeMs }; })
+      .sort((a, b) => b.mtime - a.mtime);
+  } catch { /* folder may not exist yet */ }
+  return { dir, gifs };
+});
+
 // --- Instant Replay IPC (Phase 2) ---
 ipcMain.handle('replay/get', () => settings.load().replay);
 
