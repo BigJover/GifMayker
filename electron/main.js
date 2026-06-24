@@ -370,11 +370,20 @@ ipcMain.handle('sb/remove', (_e, id) => {
 // Delete a GIF from the captures folder (to Trash) and unpin it if on the board.
 ipcMain.handle('captures/delete-gif', async (_e, file) => {
   try {
-    if (file && file.toLowerCase().endsWith('.gif') && path.dirname(file) === capturesDir() && fs.existsSync(file)) {
-      await shell.trashItem(file);
-    } else {
+    if (!(file && file.toLowerCase().endsWith('.gif') && path.dirname(file) === capturesDir() && fs.existsSync(file))) {
       return { ok: false, error: 'not a captures GIF', items: sbList() };
     }
+    const win = BrowserWindow.fromWebContents(_e.sender);
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['Cancel', 'Delete'],
+      defaultId: 1,
+      cancelId: 0,
+      message: 'Delete this GIF?',
+      detail: `${path.basename(file)} will be moved to the Trash.`,
+    });
+    if (response !== 1) return { ok: false, canceled: true, items: sbList() };
+    await shell.trashItem(file);
   } catch (e) {
     return { ok: false, error: e.message, items: sbList() };
   }
