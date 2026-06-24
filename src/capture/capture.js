@@ -218,7 +218,7 @@ async function makeGif() {
     // Copy lives in the footer (bottom-left) to keep the preview big. No detail shown.
     lastGifPath = res.path;
     const btn = $('gifCopy');
-    btn.textContent = '📋 GIF ready to copy';
+    btn.textContent = 'GIF ready to copy';
     btn.classList.remove('done');
     $('copyWrap').classList.add('show');
   } else {
@@ -574,7 +574,7 @@ $('gifCopy').addEventListener('click', async () => {
   if (r && r.ok) {
     btn.textContent = '✓ Copied — paste anywhere';
     btn.classList.add('done');
-    setTimeout(() => { btn.textContent = '📋 GIF ready to copy'; btn.classList.remove('done'); }, 1600);
+    setTimeout(() => { btn.textContent = 'GIF ready to copy'; btn.classList.remove('done'); }, 1600);
   } else {
     btn.textContent = `Copy failed: ${(r && r.error) || 'error'}`;
   }
@@ -589,7 +589,7 @@ $('miPin').addEventListener('click', async () => {
   $('copyMenu').classList.remove('show');
   if (!lastGifPath) return;
   const r = await window.gifApp.sbAdd(lastGifPath);
-  $('hint').textContent = (r && r.ok) ? '📌 Pinned to soundboard' : 'Could not pin to soundboard';
+  $('hint').textContent = (r && r.ok) ? 'Pinned to GifBoard' : 'Could not pin to GifBoard';
 });
 $('miOpen').addEventListener('click', () => { $('copyMenu').classList.remove('show'); if (lastGifPath) window.gifApp.openCapture(lastGifPath); });
 $('miReveal').addEventListener('click', () => { $('copyMenu').classList.remove('show'); if (lastGifPath) window.gifApp.revealCapture(lastGifPath); });

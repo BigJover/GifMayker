@@ -4,12 +4,13 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
   <title>GifMayker</title>
+  <link rel="stylesheet" href="../fonts.css" />
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: #13100b;
       color: #ffffff;
       height: 100vh;
@@ -33,17 +34,17 @@
     .row .meta { display: flex; flex-direction: column; }
     .row .spacer { margin-left: auto; }
     .chip {
-      font-size: 11.5px; color: #e7cf8c; background: #2c2110;
-      border: 1px solid #4e3c1a; border-radius: 7px; padding: 4px 9px;
+      font-size: 11.5px; color: #fff; background: #271f12;
+      border: 1px solid #473a22; border-radius: 8px; padding: 5px 9px;
       cursor: pointer; white-space: nowrap;
     }
     .chip:hover { border-color: #8c6f2e; }
     .chip.listening { color: #fde68a; background: #2a2410; border-color: #6b5a18; }
     .go {
-      font-size: 12px; color: #bdad84; background: #271f12; border: 1px solid #473a22;
+      font-size: 12px; color: #fff; background: #271f12; border: 1px solid #473a22;
       border-radius: 8px; padding: 7px 11px; cursor: pointer;
     }
-    .go:hover { background: #473a22; color: #ffffff; }
+    .go:hover { border-color: #8c6f2e; }
     .row.flash { background: #241d12; border-color: #8c6f2e; }
     .hint { font-size: 10.5px; color: #7c7050; margin: 12px 2px 0; text-align: center; line-height: 1.5; }
     .status { margin-top: auto; font-size: 11px; color: #9a8c66; }
@@ -58,14 +59,12 @@
 
   <div class="panel">
     <div class="row" id="row-capture">
-      <span class="emoji">🎬</span>
       <span class="meta"><span class="name">Capture</span><span class="sub">Record screen → GIF</span></span>
       <span class="spacer"></span>
       <span class="chip" data-action="capture" id="chip-capture">…</span>
       <span class="go" data-action="capture">Open</span>
     </div>
     <div class="row" id="row-soundboard">
-      <span class="emoji">🔲</span>
       <span class="meta"><span class="name">GifBoard</span><span class="sub">Favorite GIFs, one click to copy</span></span>
       <span class="spacer"></span>
       <span class="chip" data-action="soundboard" id="chip-soundboard">…</span>

@@ -4,11 +4,12 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; media-src 'self' blob:;" />
   <title>Capture</title>
+  <link rel="stylesheet" href="../fonts.css" />
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body {
-      margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0; font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: #13100b; color: #ffffff; height: 100vh; display: flex; flex-direction: column;
       user-select: none;
     }
@@ -59,13 +60,13 @@
     .saved code { color: #bdad84; font-size: 11px; }
     .copywrap { position: relative; display: none; align-items: stretch; }
     .copywrap.show { display: inline-flex; }
-    .copybtn { background: #c39a2c; border: 1px solid #c39a2c; color: #1a1407;
-      font-weight: 700; font-size: 14px; border-radius: 10px 0 0 10px; padding: 11px 18px; cursor: pointer; }
-    .copybtn:hover { background: #d4af37; }
+    .copybtn { background: #d4af37; border: 1px solid #d4af37; color: #1a1407;
+      font-weight: 700; font-size: 13px; border-radius: 8px 0 0 8px; padding: 10px 16px; cursor: pointer; }
+    .copybtn:hover { background: #c39a2c; }
     .copybtn.done { background: #a37f1c; }
-    .copycaret { background: #c39a2c; border: 1px solid #c39a2c; border-left: 1px solid #9a7a1c; color: #1a1407;
-      font-size: 12px; border-radius: 0 10px 10px 0; padding: 0 11px; cursor: pointer; }
-    .copycaret:hover { background: #d4af37; }
+    .copycaret { background: #d4af37; border: 1px solid #d4af37; border-left: 1px solid #a37f1c; color: #1a1407;
+      font-size: 12px; border-radius: 0 8px 8px 0; padding: 0 11px; cursor: pointer; }
+    .copycaret:hover { background: #c39a2c; }
     .copymenu { position: absolute; bottom: calc(100% + 6px); left: 0; min-width: 190px;
       background: #211a11; border: 1px solid #473a22; border-radius: 10px; padding: 5px;
       display: none; box-shadow: 0 -8px 26px rgba(0,0,0,.45); z-index: 10; }
@@ -93,8 +94,8 @@
     .savebar { padding: 8px 20px; display: flex; align-items: center; gap: 8px;
       border-bottom: 1px solid #2a2316; font-size: 11.5px; color: #ab9c78; }
     .savebar .dir { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bdad84; }
-    .mini { font-size: 11px; color: #e7cf8c; background: #2c2110; border: 1px solid #4e3c1a;
-      border-radius: 7px; padding: 4px 9px; cursor: pointer; white-space: nowrap; }
+    .mini { font-size: 11px; color: #fff; background: #271f12; border: 1px solid #473a22;
+      border-radius: 8px; padding: 5px 9px; cursor: pointer; white-space: nowrap; }
     .mini:hover { border-color: #8c6f2e; }
 
     /* crop overlay */
@@ -139,13 +140,11 @@
 <body>
   <header>
     <button class="hbtn" id="homeBtn" title="Back to menu">←</button>
-    <span style="font-size:16px">🎬</span>
     <h1>Capture</h1>
     <span class="step" id="step">Pick a source</span>
   </header>
 
   <div class="savebar">
-    <span>📁</span>
     <span class="dir" id="saveDir" title="">…</span>
     <span class="mini" id="changeDirBtn">Change…</span>
     <span class="mini" id="openDirBtn">Open</span>
@@ -217,10 +216,10 @@
 
   <footer>
     <span class="copywrap" id="copyWrap">
-      <button class="copybtn" id="gifCopy">📋 GIF ready to copy</button>
+      <button class="copybtn" id="gifCopy">GIF ready to copy</button>
       <button class="copycaret" id="gifMore" title="More actions">▾</button>
       <div class="copymenu" id="copyMenu">
-        <button class="cmi" id="miPin">📌 Pin to soundboard</button>
+        <button class="cmi" id="miPin">Pin to GifBoard</button>
         <button class="cmi" id="miOpen">Open GIF</button>
         <button class="cmi" id="miReveal">Open file location</button>
       </div>
