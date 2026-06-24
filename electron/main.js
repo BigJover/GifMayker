@@ -218,7 +218,22 @@ function rebuildTrayMenu() {
   tray.setContextMenu(menu);
 }
 
-app.whenReady().then(() => {
+// Single-instance lock: a second launch just focuses the existing window.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    createControlWindow();
+    if (controlWin && !controlWin.isDestroyed()) {
+      if (controlWin.isMinimized()) controlWin.restore();
+      controlWin.show();
+      controlWin.focus();
+    }
+  });
+}
+
+if (gotSingleInstanceLock) app.whenReady().then(() => {
   // Mac: minimal menu (keeps Cmd+Q + copy/paste, drops reload/devtools).
   // Windows/Linux: no menu bar at all (also kills the Ctrl+R reload / F12
   // devtools accelerators that could interfere with hotkey rebinding).

@@ -201,6 +201,17 @@ async function makeGif() {
   $('copyMenu').classList.remove('show');
 
   const outSeconds = effectiveDuration() / (speed || 1);
+  // Guard the maxed-speed + min-fps edge case that yields <1 frame (ffmpeg errors).
+  if (outSeconds * fps < 1) {
+    $('gifBtn').disabled = false;
+    $('gifBtn').textContent = 'Make GIF';
+    $('gifout').style.display = 'block';
+    $('gifout').style.color = '#d56a4a';
+    $('gifout').textContent = 'Too few frames at this speed × frame-rate — lower the speed or raise the fps.';
+    $('hint').textContent = '';
+    return;
+  }
+  $('gifout').style.color = '';
   let res;
   try {
     res = await window.gifApp.toGif({ src: lastSavedPath, fps, width, trim, crop, speed, outSeconds });
