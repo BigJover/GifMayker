@@ -38,6 +38,7 @@ async function startBuffer({ sourceId, seconds }) {
     });
   } catch (e) {
     console.error('[buffer] getUserMedia failed:', e.message);
+    try { window.gifApp.replayError(e.message || 'screen capture failed'); } catch { /* ignore */ }
     return;
   }
   running = true;

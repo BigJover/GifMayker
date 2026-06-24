@@ -11,7 +11,7 @@ function visible() {
   return items.filter((g) => !query || g.name.toLowerCase().includes(query));
 }
 
-function fileURL(p) { return `file://${encodeURI(p)}`; }
+function fileURL(p) { return window.gifApp.toFileUrl(p); }
 
 function render() {
   const list = visible();

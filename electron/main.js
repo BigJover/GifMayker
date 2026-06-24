@@ -419,6 +419,15 @@ ipcMain.handle('captures/list-gifs', () => {
 });
 
 // --- Instant Replay IPC (Phase 2) ---
+// Surface buffer-capture failures (e.g., on Windows) so they're not silent.
+ipcMain.handle('replay/error', (_e, msg) => {
+  console.error('[replay] buffer error:', msg);
+  if (Notification.isSupported()) {
+    new Notification({ title: 'Instant Replay', body: `Couldn't start recording: ${msg}`, silent: true }).show();
+  }
+  return true;
+});
+
 ipcMain.handle('replay/get', () => settings.load().replay);
 
 ipcMain.handle('replay/set-enabled', async (_e, on) => {
@@ -585,18 +594,31 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
 // PNG. On macOS we instead put the file itself on the pasteboard (public.file-url)
 // so pasting into Discord/Slack/iMessage attaches the *animated* file. Other
 // platforms fall back to a static image (best effort until per-OS handling lands).
-ipcMain.handle('capture/copy-gif', (_e, file) => {
+ipcMain.handle('capture/copy-gif', async (_e, file) => {
   try {
     if (!file || !fs.existsSync(file)) return { ok: false, error: 'file not found' };
     if (process.platform === 'darwin') {
-      const url = 'file://' + encodeURI(file);
-      clipboard.writeBuffer('public.file-url', Buffer.from(url, 'utf8'));
+      // Put the file on the pasteboard so paste attaches the ANIMATED gif.
+      clipboard.writeBuffer('public.file-url', Buffer.from(require('url').pathToFileURL(file).href, 'utf8'));
+      return { ok: true, mode: 'file' };
+    }
+    if (process.platform === 'win32') {
+      // Set-Clipboard puts the file on the clipboard (CF_HDROP) so pasting into
+      // Discord/Slack/etc. attaches the animated GIF, like the macOS path.
+      await new Promise((resolve, reject) => {
+        const ps = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+          `Set-Clipboard -LiteralPath "${file.replace(/"/g, '')}"`]);
+        let err = '';
+        ps.stderr.on('data', (d) => { err += d.toString(); });
+        ps.on('error', reject);
+        ps.on('close', (code) => code === 0 ? resolve() : reject(new Error(err || ('exit ' + code))));
+      });
       return { ok: true, mode: 'file' };
     }
     const img = nativeImage.createFromPath(file);
     if (img.isEmpty()) return { ok: false, error: 'could not read image' };
     clipboard.writeImage(img);
-    return { ok: true, mode: 'image' }; // static frame on non-mac for now
+    return { ok: true, mode: 'image' };
   } catch (e) {
     return { ok: false, error: e.message };
   }

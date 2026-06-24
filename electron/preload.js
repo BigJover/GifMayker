@@ -44,6 +44,16 @@ contextBridge.exposeInMainWorld('gifApp', {
   revealCapture: (file) => ipcRenderer.invoke('capture/reveal', file),
   openCapture: (file) => ipcRenderer.invoke('capture/open', file),
   copyGif: (file) => ipcRenderer.invoke('capture/copy-gif', file),
+  // Correct file:// URL on every OS (Windows paths need file:///C:/... form).
+  toFileUrl: (p) => {
+    try { return require('url').pathToFileURL(p).href; }
+    catch {
+      let s = String(p).replace(/\\/g, '/');
+      if (/^[A-Za-z]:/.test(s)) s = '/' + s;            // C:/x -> /C:/x
+      return 'file://' + s.replace(/ /g, '%20').replace(/#/g, '%23').replace(/\?/g, '%3F');
+    }
+  },
+  replayError: (msg) => ipcRenderer.invoke('replay/error', msg),
   toGif: (opts) => ipcRenderer.invoke('capture/to-gif', opts),
 
   // Save location

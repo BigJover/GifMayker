@@ -213,7 +213,7 @@ async function makeGif() {
   if (res && res.ok) {
     // Show the actual generated GIF below the (still-editable) source clip,
     // cache-busted so re-converting with new settings refreshes it.
-    $('gifPreview').src = `file://${encodeURI(res.path)}?t=${Date.now()}`;
+    $('gifPreview').src = `${window.gifApp.toFileUrl(res.path)}?t=${Date.now()}`;
     $('gifwrap').classList.add('show');
     $('hint').textContent = '';
     // Copy lives in the footer (bottom-left) to keep the preview big. No detail shown.
@@ -608,7 +608,7 @@ function loadClip(file) {
   $('gifBtn').disabled = false;
   const v = $('preview');
   v.srcObject = null;
-  v.src = `file://${encodeURI(file)}`;
+  v.src = window.gifApp.toFileUrl(file);
   v.muted = true; v.loop = true;
   v.play().catch(() => {});
   v.addEventListener('loadedmetadata', initEditor, { once: true });
