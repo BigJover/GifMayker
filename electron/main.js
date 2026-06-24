@@ -143,8 +143,19 @@ async function armReplay() {
     },
   });
   await bufferWin.loadFile(path.join(__dirname, '..', 'src', 'buffer', 'index.html'));
-  // Pick the chosen monitor (or the first) to continuously buffer.
   const { replay } = settings.load();
+
+  if (replay.mode === 'webcam') {
+    // Webcam buffer: make sure Camera access is granted, then let the buffer
+    // window grab the chosen camera by deviceId (null = default camera).
+    if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('camera') !== 'granted') {
+      try { await systemPreferences.askForMediaAccess('camera'); } catch { /* handled in buffer */ }
+    }
+    bufferWin.webContents.send('replay/start', { mode: 'webcam', deviceId: replay.deviceId, seconds: replay.seconds });
+    return;
+  }
+
+  // Screen buffer: pick the chosen monitor (or the first) to continuously buffer.
   let srcId = null;
   try {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
@@ -153,7 +164,7 @@ async function armReplay() {
     chosen = chosen || sources[0];
     if (chosen) srcId = chosen.id;
   } catch (e) { console.error('[replay] getSources failed:', e.message); }
-  bufferWin.webContents.send('replay/start', { sourceId: srcId, seconds: replay.seconds });
+  bufferWin.webContents.send('replay/start', { mode: 'screen', sourceId: srcId, seconds: replay.seconds });
 }
 
 function disarmReplay() {
@@ -477,6 +488,22 @@ ipcMain.handle('replay/set-screen', async (_e, displayId) => {
   return cfg.replay;
 });
 
+ipcMain.handle('replay/set-mode', async (_e, mode) => {
+  const cfg = settings.load();
+  cfg.replay.mode = mode === 'webcam' ? 'webcam' : 'screen';
+  settings.save(cfg);
+  if (cfg.replay.enabled) { disarmReplay(); await armReplay(); } // re-arm on the new source
+  return cfg.replay;
+});
+
+ipcMain.handle('replay/set-camera', async (_e, deviceId) => {
+  const cfg = settings.load();
+  cfg.replay.deviceId = deviceId || null;
+  settings.save(cfg);
+  if (cfg.replay.enabled && cfg.replay.mode === 'webcam') { disarmReplay(); await armReplay(); }
+  return cfg.replay;
+});
+
 ipcMain.handle('replay/set-enabled', async (_e, on) => {
   const cfg = settings.load();
   cfg.replay.enabled = !!on;
@@ -545,6 +572,28 @@ ipcMain.handle('capture/open-screen-prefs', () => {
   return true;
 });
 
+// Webcam uses a SEPARATE macOS permission (Camera, not Screen Recording).
+ipcMain.handle('camera/permission', () => {
+  if (process.platform !== 'darwin') return 'granted';
+  return systemPreferences.getMediaAccessStatus('camera'); // granted | denied | restricted | not-determined
+});
+
+// Prompt for camera access (macOS shows the OS dialog the first time). Resolves
+// to true if granted. No-op elsewhere. Call before getUserMedia for the webcam.
+ipcMain.handle('camera/ask', async () => {
+  if (process.platform !== 'darwin') return true;
+  if (systemPreferences.getMediaAccessStatus('camera') === 'granted') return true;
+  try { return await systemPreferences.askForMediaAccess('camera'); }
+  catch { return false; }
+});
+
+ipcMain.handle('camera/open-prefs', () => {
+  if (process.platform === 'darwin') {
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Camera');
+  }
+  return true;
+});
+
 // List capturable sources (screens + windows) with preview thumbnails.
 ipcMain.handle('capture/sources', async () => {
   const sources = await desktopCapturer.getSources({
@@ -609,12 +658,18 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
     const out = src.replace(/\.webm$/i, '') + '.gif';
     const w = width === 'orig' ? null : Number(width);
 
-    // Trim via accurate (post-decode) seek so the cut lands on the right frame.
-    const trimArgs = [];
+    // Trim with INPUT seeking: -ss before -i fast-seeks to the nearest keyframe
+    // (no decode-and-discard from frame 0), then decodes to the exact frame, and
+    // resets output PTS to 0 so the fps/palette chain runs clean. Output seeking
+    // (-ss after -i) decoded the whole head of the clip first — so trimming to the
+    // back half was slow and produced bad/timestamp-skewed GIFs.
+    const preInput = [];   // before -i (the seek)
+    const postInput = [];  // after -i (the duration cap, measured from the cut)
     if (trim && trim.duration > 0) {
-      trimArgs.push('-ss', String(trim.start || 0), '-t', String(trim.duration));
+      preInput.push('-ss', String(trim.start || 0));
+      postInput.push('-t', String(trim.duration));
     }
-    const args = ['-y', '-i', src, ...trimArgs, '-vf', gifFilter(Number(fps), w, crop, Number(speed)), '-loop', '0', out];
+    const args = ['-y', ...preInput, '-i', src, ...postInput, '-vf', gifFilter(Number(fps), w, crop, Number(speed)), '-loop', '0', out];
 
     let proc;
     try {

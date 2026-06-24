@@ -115,8 +115,19 @@
         <button class="toggle" id="replayToggle" aria-pressed="false">Off</button>
       </div>
       <div class="sp-row">
+        <span class="sp-label">Source</span>
+        <select class="sel" id="replayMode" style="max-width:170px">
+          <option value="screen">Screen</option>
+          <option value="webcam">Webcam</option>
+        </select>
+      </div>
+      <div class="sp-row" id="replayScreenRow">
         <span class="sp-label">Monitor</span>
         <select class="sel" id="replayScreen" style="max-width:170px"></select>
+      </div>
+      <div class="sp-row" id="replayCameraRow" style="display:none">
+        <span class="sp-label">Camera</span>
+        <select class="sel" id="replayCamera" style="max-width:170px"></select>
       </div>
       <div class="sp-row">
         <span class="sp-label">Buffer length</span>
@@ -133,7 +144,7 @@
         <span class="sp-label">Save hotkey</span>
         <span class="chip" data-action="saveReplay" id="chip-saveReplay">…</span>
       </div>
-      <p class="sp-note">When on, GifMayker constantly records the screen. Press the hotkey to save the last clip and edit it into a GIF.</p>
+      <p class="sp-note" id="replayNote">When on, GifMayker constantly records the screen. Press the hotkey to save the last clip and edit it into a GIF.</p>
     </div>
   </div>
 

@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('gifApp', {
   closeCapture: () => ipcRenderer.invoke('capture/close'),
   capturePermission: () => ipcRenderer.invoke('capture/permission'),
 
+  // Webcam capture (separate macOS Camera permission)
+  cameraPermission: () => ipcRenderer.invoke('camera/permission'),
+  askCamera: () => ipcRenderer.invoke('camera/ask'),
+  openCameraPrefs: () => ipcRenderer.invoke('camera/open-prefs'),
+
   // Soundboard (M6)
   closeSoundboard: () => ipcRenderer.invoke('soundboard/close'),
   sbList: () => ipcRenderer.invoke('sb/list'),
@@ -37,6 +42,8 @@ contextBridge.exposeInMainWorld('gifApp', {
   setReplaySeconds: (s) => ipcRenderer.invoke('replay/set-seconds', s),
   listScreens: () => ipcRenderer.invoke('replay/list-screens'),
   setReplayScreen: (displayId) => ipcRenderer.invoke('replay/set-screen', displayId),
+  setReplayMode: (mode) => ipcRenderer.invoke('replay/set-mode', mode),
+  setReplayCamera: (deviceId) => ipcRenderer.invoke('replay/set-camera', deviceId),
   replaySubmit: (buffers) => ipcRenderer.invoke('replay/submit', buffers),
   onReplayStart: (cb) => ipcRenderer.on('replay/start', (_e, opts) => cb(opts)),
   onReplayStop: (cb) => ipcRenderer.on('replay/stop', () => cb()),

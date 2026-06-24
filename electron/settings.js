@@ -18,6 +18,8 @@ const DEFAULTS = {
     enabled: false,
     seconds: 30,
     displayId: null, // which monitor to record; null = primary/first
+    mode: 'screen',  // 'screen' = capture a monitor, 'webcam' = capture the camera
+    deviceId: null,  // which webcam in 'webcam' mode; null = default camera
   },
 };
 

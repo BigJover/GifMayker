@@ -25,21 +25,38 @@ let loopTimer = null;  // drives the trimmed-region preview loop
 
 // ---- permission + sources ----
 async function init() {
-  const perm = await window.gifApp.capturePermission();
   $('permBtn').addEventListener('click', () => window.gifApp.openScreenPrefs());
+  $('camPermBtn').addEventListener('click', () => window.gifApp.openCameraPrefs());
 
+  const perm = await window.gifApp.capturePermission();
   if (perm === 'denied' || perm === 'restricted') {
-    // getSources() throws under denied permission — don't try, just guide the user.
+    // Screen capture is blocked, but the webcam path may still work — show the
+    // banner and load whatever sources we can (cameras) rather than dead-ending.
     $('perm').classList.add('show');
-    $('grid').innerHTML = '<div class="muted">Grant Screen Recording permission to this app in System Settings, then reopen this window.</div>';
-    $('hint').textContent = 'Waiting on Screen Recording permission.';
-    return;
-  }
-  if (perm === 'not-determined') {
+  } else if (perm === 'not-determined') {
     // macOS will prompt the first time we actually capture.
     $('perm').classList.add('show');
   }
   await loadSources();
+}
+
+// Webcams the OS knows about. Before camera permission is granted the labels
+// (and sometimes deviceIds) come back empty, so we fall back to generic names
+// and collapse unidentifiable cams into a single "Webcam" tile.
+async function listCameras() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+  let devices = [];
+  try { devices = await navigator.mediaDevices.enumerateDevices(); }
+  catch { return []; }
+  const cams = devices.filter((d) => d.kind === 'videoinput');
+  if (!cams.length) return [];
+  if (cams.every((d) => !d.deviceId)) {
+    return [{ deviceId: '', label: 'Webcam' }];
+  }
+  return cams.map((d, i) => ({
+    deviceId: d.deviceId,
+    label: d.label || `Webcam ${i + 1}`,
+  }));
 }
 
 async function loadSources() {
@@ -47,13 +64,18 @@ async function loadSources() {
   try {
     sources = await window.gifApp.getSources();
   } catch (e) {
-    $('grid').innerHTML = `<div class="muted">Couldn't list sources: ${e.message}</div>`;
+    // Screen permission denied throws here — keep going so cameras still load.
+    sources = [];
+  }
+
+  const cams = await listCameras();
+
+  if (!sources.length && !cams.length) {
+    $('grid').innerHTML = '<div class="muted">No capturable sources found. Grant Screen Recording or Camera permission in System Settings, then reopen this window.</div>';
+    $('hint').textContent = 'Waiting on a capture source.';
     return;
   }
-  if (!sources.length) {
-    $('grid').innerHTML = '<div class="muted">No capturable sources found.</div>';
-    return;
-  }
+
   $('grid').innerHTML = '';
   for (const s of sources) {
     const el = document.createElement('div');
@@ -63,13 +85,21 @@ async function loadSources() {
       ? `<span class="thumb" style="background-image:url('${s.thumbnail}')"></span>`
       : `<span class="thumb"></span>`;
     el.innerHTML = `${thumb}<div class="cap"><span class="tagdot ${s.isScreen ? '' : 'win'}"></span><span title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span></div>`;
-    el.addEventListener('click', () => selectSource(s, el));
+    el.addEventListener('click', () => selectSource({ kind: 'screen', id: s.id, name: s.name }, el));
+    $('grid').appendChild(el);
+  }
+
+  for (const c of cams) {
+    const el = document.createElement('div');
+    el.className = 'src';
+    el.innerHTML = `<span class="thumb camthumb">◉</span><div class="cap"><span class="tagdot cam"></span><span title="${escapeHtml(c.label)}">${escapeHtml(c.label)}</span></div>`;
+    el.addEventListener('click', () => selectSource({ kind: 'webcam', deviceId: c.deviceId, name: c.label }, el));
     $('grid').appendChild(el);
   }
 }
 
 function selectSource(s, el) {
-  selected = { id: s.id, name: s.name };
+  selected = s;
   document.querySelectorAll('.src').forEach((n) => n.classList.remove('selected'));
   el.classList.add('selected');
   $('recBtn').disabled = false;
@@ -86,23 +116,52 @@ function pickMime() {
 
 async function startRecording() {
   if (!selected) return;
+
+  const isWebcam = selected.kind === 'webcam';
+
+  // Webcam uses the OS Camera permission (separate from Screen Recording).
+  if (isWebcam) {
+    const granted = await window.gifApp.askCamera();
+    if (!granted) {
+      $('camPerm').classList.add('show');
+      $('hint').textContent = 'Camera access is needed to record your webcam.';
+      return;
+    }
+    $('camPerm').classList.remove('show');
+  }
+
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: selected.id,
-          maxFrameRate: 30,
-          maxWidth: 1920,
-          maxHeight: 1080,
-        },
-      },
-    });
+    stream = await navigator.mediaDevices.getUserMedia(
+      isWebcam
+        ? {
+            audio: false,
+            video: {
+              ...(selected.deviceId ? { deviceId: { exact: selected.deviceId } } : {}),
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30 },
+            },
+          }
+        : {
+            audio: false,
+            video: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: selected.id,
+                maxFrameRate: 30,
+                maxWidth: 1920,
+                maxHeight: 1080,
+              },
+            },
+          }
+    );
   } catch (e) {
     $('hint').textContent = `Capture failed: ${e.message}`;
     return;
   }
+
+  // Mirror the live self-view for a natural feel (recorded output stays normal).
+  $('preview').classList.toggle('mirror', isWebcam);
 
   // switch UI to recording stage (hide Back so it can't interrupt a recording)
   $('homeBtn').style.display = 'none';
@@ -149,6 +208,10 @@ function stopRecording() {
 async function onRecorderStop() {
   const blob = new Blob(chunks, { type: 'video/webm' });
   lastSavedBlob = blob;
+
+  // The recorded clip is un-mirrored — drop the live self-view mirror so the
+  // editor preview and crop overlay match the actual GIF frames.
+  $('preview').classList.remove('mirror');
 
   // replay the captured clip
   $('preview').srcObject = null;
@@ -251,6 +314,8 @@ function resetToPicker() {
   $('preview').src = '';
   $('preview').srcObject = null;
   $('preview').style.display = '';
+  $('preview').classList.remove('mirror');
+  $('camPerm').classList.remove('show');
   $('gifPreview').src = '';
   $('gifwrap').classList.remove('show');
   $('copyWrap').classList.remove('show');
@@ -284,7 +349,7 @@ function resetToPicker() {
   $('recBtn').style.display = '';
   $('recBtn').disabled = true;
   $('step').textContent = 'Pick a source';
-  $('hint').textContent = 'Choose a screen or window to record.';
+  $('hint').textContent = 'Choose a screen, window, or webcam to record.';
   document.querySelectorAll('.src').forEach((n) => n.classList.remove('selected'));
   loadSources();
 }

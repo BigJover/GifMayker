@@ -142,7 +142,46 @@ function applyReplayState(r) {
   }
   const gear = $('replayGear'); if (gear) gear.classList.toggle('on', !!r.enabled);
   const secs = $('replaySeconds'); if (secs) secs.value = String(r.seconds);
+  const mode = r.mode === 'webcam' ? 'webcam' : 'screen';
+  const modeSel = $('replayMode'); if (modeSel) modeSel.value = mode;
+  applyReplayMode(mode);
   const sub = $('replaySub'); if (sub) sub.textContent = `Always recording — save the last ${r.seconds}s`;
+}
+
+// Show the right source picker (monitor vs camera) and adjust the note.
+function applyReplayMode(mode) {
+  const webcam = mode === 'webcam';
+  const screenRow = $('replayScreenRow'); if (screenRow) screenRow.style.display = webcam ? 'none' : '';
+  const camRow = $('replayCameraRow'); if (camRow) camRow.style.display = webcam ? '' : 'none';
+  const note = $('replayNote');
+  if (note) note.textContent = webcam
+    ? 'When on, GifMayker constantly records your webcam (the camera light stays on). Press the hotkey to save the last clip as a GIF.'
+    : 'When on, GifMayker constantly records the screen. Press the hotkey to save the last clip and edit it into a GIF.';
+  if (webcam) populateCameras();
+}
+
+// List cameras for the dropdown. Labels need camera permission; before that
+// they come back blank, so we show generic names until permission is granted.
+async function populateCameras() {
+  const sel = $('replayCamera');
+  if (!sel || !navigator.mediaDevices?.enumerateDevices) return;
+  try {
+    const cur = (await window.gifApp.getReplay()).deviceId;
+    const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    sel.innerHTML = '';
+    const def = document.createElement('option');
+    def.value = ''; def.textContent = 'Default camera';
+    if (cur == null) def.selected = true;
+    sel.appendChild(def);
+    cams.forEach((c, i) => {
+      if (!c.deviceId) return; // unidentifiable until permission granted
+      const o = document.createElement('option');
+      o.value = c.deviceId;
+      o.textContent = c.label || `Webcam ${i + 1}`;
+      if (String(c.deviceId) === String(cur)) o.selected = true;
+      sel.appendChild(o);
+    });
+  } catch { /* leave Default */ }
 }
 async function refreshReplay() {
   try { applyReplayState(await window.gifApp.getReplay()); } catch { /* ignore */ }
@@ -167,7 +206,17 @@ async function populateScreens() {
 
 try {
   $('replayScreen')?.addEventListener('change', () => window.gifApp.setReplayScreen($('replayScreen').value || null));
-  $('replayGear')?.addEventListener('click', () => { $('replayModal')?.classList.add('show'); populateScreens(); });
+  $('replayMode')?.addEventListener('change', async () => {
+    const mode = $('replayMode').value;
+    applyReplayMode(mode);
+    try { applyReplayState(await window.gifApp.setReplayMode(mode)); } catch { refreshReplay(); }
+  });
+  $('replayCamera')?.addEventListener('change', () => window.gifApp.setReplayCamera($('replayCamera').value || null));
+  $('replayGear')?.addEventListener('click', () => {
+    $('replayModal')?.classList.add('show');
+    populateScreens();
+    if ($('replayMode')?.value === 'webcam') populateCameras();
+  });
   $('replayClose')?.addEventListener('click', () => $('replayModal')?.classList.remove('show'));
   $('replayModal')?.addEventListener('click', (e) => { if (e.target === $('replayModal')) $('replayModal').classList.remove('show'); });
   $('replayToggle')?.addEventListener('click', async () => {

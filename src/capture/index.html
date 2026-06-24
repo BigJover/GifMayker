@@ -37,12 +37,18 @@
     .src .cap { padding: 8px 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
     .src .cap .tagdot { width: 7px; height: 7px; border-radius: 50%; background: #c98a3a; flex: none; }
     .src .cap .tagdot.win { background: #d4af37; }
+    .src .cap .tagdot.cam { background: #5aa9e6; }
+    /* webcam thumbnail placeholder (no live thumb like screens have) */
+    .src .thumb.camthumb { display: flex; align-items: center; justify-content: center;
+      background: #15110a; color: #5aa9e6; font-size: 30px; }
     .src .cap span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     /* recording / preview */
     .stage { display: none; flex-direction: column; align-items: center; gap: 14px; }
     .stage.show { display: flex; }
     video { width: 100%; max-width: 620px; border-radius: 12px; background: #000; border: 1px solid #3a3020; }
+    /* mirror the LIVE webcam self-view only (recorded output stays un-mirrored) */
+    video.mirror { transform: scaleX(-1); }
     .gifwrap { width: 100%; max-width: 620px; display: none; flex-direction: column; gap: 6px; }
     .gifwrap.show { display: flex; }
     .gifwrap img { width: 100%; border-radius: 12px; background: #000; border: 1px solid #d4af37;
@@ -157,6 +163,12 @@
       <button id="permBtn">Open System Settings →</button>
     </div>
 
+    <div class="perm" id="camPerm">
+      <strong>Camera permission needed.</strong>
+      <div>macOS must allow this app to use your webcam. Enable it, then reopen this window.</div>
+      <button id="camPermBtn">Open System Settings →</button>
+    </div>
+
     <div class="grid" id="grid"><div class="muted">Loading sources…</div></div>
 
     <div class="stage" id="stage">
@@ -224,7 +236,7 @@
         <button class="cmi" id="miReveal">Open file location</button>
       </div>
     </span>
-    <span class="muted" id="hint">Choose a screen or window to record.</span>
+    <span class="muted" id="hint">Choose a screen, window, or webcam to record.</span>
     <span class="spacer"></span>
     <button class="btn ghost" id="backBtn" style="display:none">↺ New capture</button>
     <span class="gifopts" id="gifopts">
@@ -234,7 +246,6 @@
         <option value="360">360p</option>
         <option value="480" selected>480px</option>
         <option value="640">640px</option>
-        <option value="orig">Original</option>
       </select>
       <select class="sel" id="gifFps" title="Frames per second">
         <option value="2.5">2.5 fps</option>

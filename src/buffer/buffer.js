@@ -21,29 +21,40 @@ function pickMime() {
   return '';
 }
 
-async function startBuffer({ sourceId, seconds }) {
+async function startBuffer({ mode, sourceId, deviceId, seconds }) {
   if (running) return;
-  if (!sourceId) { console.error('[buffer] no source id'); return; }
+  const isWebcam = mode === 'webcam';
+  if (!isWebcam && !sourceId) { console.error('[buffer] no source id'); return; }
   keepSegs = Math.ceil((seconds || 30) / (SEG_MS / 1000)) + 1;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: sourceId,
-          maxWidth: 1280, maxHeight: 720, maxFrameRate: 30, // lighter than capture
-        },
-      },
-    });
+    stream = await navigator.mediaDevices.getUserMedia(
+      isWebcam
+        ? {
+            audio: false,
+            video: {
+              ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+              width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 },
+            },
+          }
+        : {
+            audio: false,
+            video: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: sourceId,
+                maxWidth: 1280, maxHeight: 720, maxFrameRate: 30, // lighter than capture
+              },
+            },
+          }
+    );
   } catch (e) {
     console.error('[buffer] getUserMedia failed:', e.message);
-    try { window.gifApp.replayError(e.message || 'screen capture failed'); } catch { /* ignore */ }
+    try { window.gifApp.replayError(e.message || (isWebcam ? 'webcam capture failed' : 'screen capture failed')); } catch { /* ignore */ }
     return;
   }
   running = true;
   cycle();
-  console.log('[buffer] armed; keeping', keepSegs, 'segments');
+  console.log('[buffer] armed;', isWebcam ? 'webcam' : 'screen', 'keeping', keepSegs, 'segments');
 }
 
 function cycle() {
