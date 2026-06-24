@@ -25,6 +25,15 @@ contextBridge.exposeInMainWorld('gifApp', {
   sbImport: (opts) => ipcRenderer.invoke('sb/import', opts),
   sbAdd: (file) => ipcRenderer.invoke('sb/add', file),
   sbRemove: (id) => ipcRenderer.invoke('sb/remove', id),
+
+  // Instant Replay (Phase 2)
+  getReplay: () => ipcRenderer.invoke('replay/get'),
+  setReplayEnabled: (on) => ipcRenderer.invoke('replay/set-enabled', on),
+  replaySubmit: (buffers) => ipcRenderer.invoke('replay/submit', buffers),
+  onReplayStart: (cb) => ipcRenderer.on('replay/start', (_e, opts) => cb(opts)),
+  onReplayStop: (cb) => ipcRenderer.on('replay/stop', () => cb()),
+  onReplaySave: (cb) => ipcRenderer.on('replay/save', () => cb()),
+  onLoadClip: (cb) => ipcRenderer.on('capture/load-clip', (_e, file) => cb(file)),
   openScreenPrefs: () => ipcRenderer.invoke('capture/open-screen-prefs'),
   getSources: () => ipcRenderer.invoke('capture/sources'),
   saveCapture: (arrayBuffer) => ipcRenderer.invoke('capture/save', arrayBuffer),

@@ -14,13 +14,37 @@ async function refreshHotkeys() {
   const { hotkeys, status } = await window.gifApp.getHotkeys();
   $('chip-capture').textContent = pretty(hotkeys.capture);
   $('chip-soundboard').textContent = pretty(hotkeys.soundboard);
-  const allOk = status.capture && status.soundboard;
+  $('chip-saveReplay').textContent = pretty(hotkeys.saveReplay);
+  const allOk = status.capture && status.soundboard && status.saveReplay;
   $('dot').className = 'dot' + (allOk ? '' : ' warn');
   $('statusText').textContent = allOk
     ? 'Running in the menu bar'
     : 'A hotkey is conflicting — click it to rebind';
 }
 refreshHotkeys();
+
+// --- Instant Replay toggle ---
+async function refreshReplay() {
+  try {
+    const r = await window.gifApp.getReplay();
+    const t = $('replayToggle');
+    t.classList.toggle('on', !!r.enabled);
+    t.textContent = r.enabled ? 'On' : 'Off';
+    t.setAttribute('aria-pressed', r.enabled ? 'true' : 'false');
+  } catch { /* ignore */ }
+}
+$('replayToggle').addEventListener('click', async () => {
+  const t = $('replayToggle');
+  const turnOn = !t.classList.contains('on');
+  t.textContent = '…';
+  try {
+    const r = await window.gifApp.setReplayEnabled(turnOn);
+    t.classList.toggle('on', !!r.enabled);
+    t.textContent = r.enabled ? 'On' : 'Off';
+    t.setAttribute('aria-pressed', r.enabled ? 'true' : 'false');
+  } catch { refreshReplay(); }
+});
+refreshReplay();
 
 // Make accelerators read nicely (Command symbol on mac, words elsewhere).
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC');

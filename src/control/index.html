@@ -45,6 +45,12 @@
       border-radius: 8px; padding: 7px 11px; cursor: pointer;
     }
     .go:hover { border-color: #8c6f2e; }
+    .toggle {
+      font-size: 12px; border-radius: 8px; padding: 7px 14px; cursor: pointer;
+      border: 1px solid #473a22; background: #271f12; color: #fff; min-width: 56px;
+    }
+    .toggle:hover { border-color: #8c6f2e; }
+    .toggle.on { background: #d4af37; border-color: #d4af37; color: #1a1407; font-weight: 600; }
     .row.flash { background: #241d12; border-color: #8c6f2e; }
     .hint { font-size: 10.5px; color: #7c7050; margin: 12px 2px 0; text-align: center; line-height: 1.5; }
     .status { margin-top: auto; font-size: 11px; color: #9a8c66; }
@@ -69,6 +75,12 @@
       <span class="spacer"></span>
       <span class="chip" data-action="soundboard" id="chip-soundboard">…</span>
       <span class="go" data-action="soundboard">Open</span>
+    </div>
+    <div class="row" id="row-saveReplay">
+      <span class="meta"><span class="name">Instant Replay</span><span class="sub">Always recording — save the last 30s</span></span>
+      <span class="spacer"></span>
+      <span class="chip" data-action="saveReplay" id="chip-saveReplay">…</span>
+      <button class="toggle" id="replayToggle" aria-pressed="false">Off</button>
     </div>
   </div>
 

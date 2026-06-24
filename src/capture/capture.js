@@ -21,6 +21,7 @@ let videoW = 0, videoH = 0;  // source pixels
 let cropOn = false;
 let cropRatio = null;  // null = free form; otherwise width/height
 let drag = null;
+let loopTimer = null;  // drives the trimmed-region preview loop
 
 // ---- permission + sources ----
 async function init() {
@@ -258,6 +259,7 @@ function resetToPicker() {
   $('cropAspect').disabled = true;
   $('cropToggle').classList.remove('on');
   $('cropToggle').textContent = '▢ Crop: Off';
+  if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
   clipDuration = 0; videoW = 0; videoH = 0;
   $('trimStart').value = 0; $('trimEnd').value = 1000;
   $('gifSpeed').value = '1';
@@ -285,6 +287,9 @@ function initEditor() {
     updateTrimUI();
     updateEstimate();
     applySpeed(); // reflect current speed on the preview
+    // Loop the preview within the trim selection (tight timer for accuracy).
+    if (loopTimer) clearInterval(loopTimer);
+    loopTimer = setInterval(enforceTrimLoop, 40);
     $('tools').classList.add('show');
   });
 }
@@ -332,7 +337,31 @@ function onTrimInput(which) {
   }
   updateTrimUI();
   updateEstimate();
-  if (clipDuration) $('preview').currentTime = ((which === 'start' ? a : b) / 1000) * clipDuration;
+  // Scrub to the handle being dragged so you see that exact frame. For the end
+  // handle, sit just before it (the loop would otherwise instantly jump away).
+  if (clipDuration) {
+    const { start, end } = trimSeconds();
+    $('preview').currentTime = which === 'start' ? start : Math.max(start, end - 0.12);
+  }
+}
+
+// start/end of the trim selection in seconds (always defined once a clip loads)
+function trimSeconds() {
+  if (!clipDuration) return { start: 0, end: 0 };
+  const { a, b } = trimValues();
+  return { start: (a / 1000) * clipDuration, end: (b / 1000) * clipDuration };
+}
+
+// Loop the PREVIEW within the trimmed range so it plays exactly what the GIF
+// will contain (instead of the whole clip).
+function enforceTrimLoop() {
+  if (!clipDuration) return;
+  const v = $('preview');
+  const { start, end } = trimSeconds();
+  if (v.currentTime >= end - 0.03 || v.currentTime < start - 0.08) {
+    v.currentTime = start;
+    if (v.paused) v.play().catch(() => {});
+  }
 }
 
 function trimRect() {
@@ -560,6 +589,30 @@ function fmtSec(s) {
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+// ---- Instant Replay: load an external clip into the editor (Phase 2) ----
+function loadClip(file) {
+  resetToPicker();
+  $('grid').style.display = 'none';
+  $('recBtn').style.display = 'none';
+  $('stage').classList.add('show');
+  $('homeBtn').style.display = '';
+  $('backBtn').style.display = '';
+  $('gifBtn').style.display = '';
+  $('gifopts').classList.add('show');
+  $('step').textContent = 'Replay';
+  lastSavedBlob = null;
+  lastSavedPath = file;
+  $('gifBtn').disabled = false;
+  const v = $('preview');
+  v.srcObject = null;
+  v.src = `file://${encodeURI(file)}`;
+  v.muted = true; v.loop = true;
+  v.play().catch(() => {});
+  v.addEventListener('loadedmetadata', initEditor, { once: true });
+  $('hint').textContent = 'Replay loaded — trim/crop, then make your GIF.';
+}
+window.gifApp.onLoadClip(loadClip);
 
 // ---- wire buttons ----
 $('homeBtn').addEventListener('click', () => window.gifApp.closeCapture());

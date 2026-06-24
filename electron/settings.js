@@ -8,10 +8,16 @@ const DEFAULTS = {
   hotkeys: {
     capture: 'CommandOrControl+Shift+G',
     soundboard: 'CommandOrControl+Shift+B',
+    saveReplay: 'CommandOrControl+Shift+R',
   },
   // null = use the default captures folder inside app-data; otherwise an
   // absolute directory the user chose for saved videos + GIFs.
   saveDir: null,
+  // Instant Replay (Phase 2): a rolling background buffer of the last N seconds.
+  replay: {
+    enabled: false,
+    seconds: 30,
+  },
 };
 
 let cache = null;
@@ -23,6 +29,7 @@ function load() {
     const disk = JSON.parse(fs.readFileSync(file(), 'utf8'));
     cache = { ...DEFAULTS, ...disk };
     cache.hotkeys = { ...DEFAULTS.hotkeys, ...(disk.hotkeys || {}) };
+    cache.replay = { ...DEFAULTS.replay, ...(disk.replay || {}) };
   } catch {
     cache = JSON.parse(JSON.stringify(DEFAULTS));
   }

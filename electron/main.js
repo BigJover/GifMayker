@@ -6,6 +6,7 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, No
   desktopCapturer, systemPreferences, shell, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { spawn } = require('child_process');
 // In a packaged build the binary is unpacked beside the asar (see asarUnpack),
 // so rewrite the path; in dev it resolves to node_modules unchanged.
@@ -18,6 +19,7 @@ let tray = null;
 let controlWin = null;
 let captureWin = null;
 let soundboardWin = null;
+let bufferWin = null;   // hidden window running the instant-replay rolling buffer
 
 const capturesDir = () => {
   const { saveDir } = settings.load();
@@ -118,6 +120,53 @@ function runAction(kind) {
     console.log('[hotkey] soundboard fired');
     return;
   }
+  if (kind === 'saveReplay') {
+    saveReplay();
+    console.log('[hotkey] saveReplay fired');
+    return;
+  }
+}
+
+// --- Instant Replay (Phase 2): hidden rolling-buffer window ---
+async function armReplay() {
+  if (bufferWin && !bufferWin.isDestroyed()) return;
+  bufferWin = new BrowserWindow({
+    width: 320, height: 200, show: false, skipTaskbar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false, // keep capturing when hidden
+    },
+  });
+  await bufferWin.loadFile(path.join(__dirname, '..', 'src', 'buffer', 'index.html'));
+  // Grab the primary screen as the source to continuously buffer.
+  let srcId = null;
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    if (sources.length) srcId = sources[0].id;
+  } catch (e) { console.error('[replay] getSources failed:', e.message); }
+  const { replay } = settings.load();
+  bufferWin.webContents.send('replay/start', { sourceId: srcId, seconds: replay.seconds });
+}
+
+function disarmReplay() {
+  if (bufferWin && !bufferWin.isDestroyed()) {
+    bufferWin.webContents.send('replay/stop');
+    bufferWin.destroy();
+  }
+  bufferWin = null;
+}
+
+function saveReplay() {
+  const { replay } = settings.load();
+  if (!replay.enabled || !bufferWin || bufferWin.isDestroyed()) {
+    if (Notification.isSupported()) {
+      new Notification({ title: 'GifMayker', body: 'Instant Replay is off — turn it on first.', silent: true }).show();
+    }
+    return;
+  }
+  bufferWin.webContents.send('replay/save');
 }
 
 // --- Global hotkeys ---
@@ -127,7 +176,7 @@ function registerHotkeys() {
   globalShortcut.unregisterAll();
   const { hotkeys } = settings.load();
   const status = {};
-  for (const kind of ['capture', 'soundboard']) {
+  for (const kind of ['capture', 'soundboard', 'saveReplay']) {
     const accel = hotkeys[kind];
     let ok = false;
     try {
@@ -156,6 +205,7 @@ function rebuildTrayMenu() {
     { type: 'separator' },
     { label: `Capture   (${hotkeys.capture})`, click: () => runAction('capture') },
     { label: `GifBoard   (${hotkeys.soundboard})`, click: () => runAction('soundboard') },
+    { label: `Save Replay   (${hotkeys.saveReplay})`, click: () => runAction('saveReplay') },
     { type: 'separator' },
     { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
@@ -167,6 +217,8 @@ app.whenReady().then(() => {
   createControlWindow();
   const status = registerHotkeys();
   console.log('[hotkeys] registration:', JSON.stringify(status));
+
+  if (settings.load().replay.enabled) armReplay();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createControlWindow();
@@ -206,12 +258,13 @@ ipcMain.handle('hotkeys/get', () => {
     status: {
       capture: globalShortcut.isRegistered(hotkeys.capture),
       soundboard: globalShortcut.isRegistered(hotkeys.soundboard),
+      saveReplay: globalShortcut.isRegistered(hotkeys.saveReplay),
     },
   };
 });
 
 ipcMain.handle('hotkeys/set', (_e, { action, accelerator }) => {
-  if (!['capture', 'soundboard'].includes(action) || !accelerator) {
+  if (!['capture', 'soundboard', 'saveReplay'].includes(action) || !accelerator) {
     return { ok: false, error: 'bad request' };
   }
   const cfg = settings.load();
@@ -307,6 +360,56 @@ ipcMain.handle('sb/remove', (_e, id) => {
   library.save(store);
   return sbList();
 });
+
+// --- Instant Replay IPC (Phase 2) ---
+ipcMain.handle('replay/get', () => settings.load().replay);
+
+ipcMain.handle('replay/set-enabled', async (_e, on) => {
+  const cfg = settings.load();
+  cfg.replay.enabled = !!on;
+  settings.save(cfg);
+  if (cfg.replay.enabled) await armReplay(); else disarmReplay();
+  return cfg.replay;
+});
+
+// The buffer window submits its kept segments; concat them into one clip and
+// open it in the Capture editor (trim/crop/GIF flow).
+ipcMain.handle('replay/submit', (_e, buffers) => {
+  return new Promise((resolve) => {
+    if (!buffers || !buffers.length) { resolve({ ok: false, error: 'empty buffer' }); return; }
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-replay-'));
+    const files = buffers.map((buf, i) => {
+      const p = path.join(tmp, `seg${String(i).padStart(3, '0')}.webm`);
+      fs.writeFileSync(p, Buffer.from(buf));
+      return p;
+    });
+    const listPath = path.join(tmp, 'list.txt');
+    fs.writeFileSync(listPath, files.map((f) => `file '${f}'`).join('\n'));
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const out = path.join(capturesDir(), `replay-${stamp}.webm`);
+    const proc = spawn(ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', out]);
+    let err = '';
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', (e) => resolve({ ok: false, error: e.message }));
+    proc.on('close', (code) => {
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+      if (code === 0 && fs.existsSync(out)) {
+        openClipInEditor(out);
+        resolve({ ok: true, path: out });
+      } else {
+        resolve({ ok: false, error: `concat failed (${code}): ${err.slice(-300)}` });
+      }
+    });
+  });
+});
+
+// Open an existing clip in the Capture window's editor.
+function openClipInEditor(file) {
+  createCaptureWindow();
+  const send = () => { if (captureWin && !captureWin.isDestroyed()) captureWin.webContents.send('capture/load-clip', file); };
+  if (captureWin.webContents.isLoading()) captureWin.webContents.once('did-finish-load', send);
+  else send();
+}
 
 // macOS gates screen capture behind a Screen Recording permission. Other OSes: granted.
 ipcMain.handle('capture/permission', () => {
