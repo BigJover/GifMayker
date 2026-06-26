@@ -248,7 +248,7 @@ async function onRecorderStop() {
 // ---- GIF conversion (M3) ----
 async function makeGif() {
   if (!lastSavedPath) return;
-  const width = $('gifSize').value;        // '480' | '640' | 'orig'
+  const width = $('gifSize').value;        // e.g. '480' | '640'
   const fps = Number($('gifFps').value);
   const speed = Number($('gifSpeed').value); // 0.25 .. 5
   const trim = trimRect();                 // null = whole clip
@@ -627,7 +627,7 @@ function outputDims() {
   const c = cropRect();
   if (c) { bw = c.w; bh = c.h; }
   const sel = $('gifSize').value;
-  if (sel === 'orig' || !bw) return { w: bw, h: bh };
+  if (!bw) return { w: bw, h: bh };
   const w = Number(sel);
   return { w, h: Math.round(w * bh / bw) };
 }

@@ -229,3 +229,37 @@ try {
   });
   refreshReplay();
 } catch (e) { console.error('[control] replay wiring failed:', e); }
+
+// --- Custom color theme (Trim / Background / Text wheels) — optional, guarded ---
+try {
+  const D = (window.__theme && window.__theme.DEFAULTS) || { accent: '#d4af37', bg: '#13100b', text: '#ffffff' };
+  const inputs = { accent: $('themeAccent'), bg: $('themeBg'), text: $('themeText') };
+  let theme = { accent: null, bg: null, text: null };
+
+  // Show each wheel's current color (the custom pick, or the gold default).
+  const syncInputs = () => {
+    for (const k of ['accent', 'bg', 'text']) if (inputs[k]) inputs[k].value = theme[k] || D[k];
+  };
+  const preview = () => { try { window.__theme.apply(theme); } catch { /* ignore */ } };
+
+  (async () => {
+    try { theme = { ...theme, ...(await window.gifApp.getTheme()) }; } catch { /* defaults */ }
+    syncInputs();
+  })();
+
+  for (const k of ['accent', 'bg', 'text']) {
+    const el = inputs[k];
+    if (!el) continue;
+    // Live preview while dragging the color wheel…
+    el.addEventListener('input', () => { theme[k] = el.value; preview(); });
+    // …persist + broadcast to every window once the pick is committed.
+    el.addEventListener('change', () => { theme[k] = el.value; window.gifApp.setTheme({ [k]: el.value }); });
+  }
+
+  $('themeReset')?.addEventListener('click', () => {
+    theme = { accent: null, bg: null, text: null };
+    syncInputs();
+    preview();
+    window.gifApp.setTheme(theme);
+  });
+} catch (e) { console.error('[control] theme wiring failed:', e); }

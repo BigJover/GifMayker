@@ -40,7 +40,7 @@ function createControlWindow() {
   }
   controlWin = new BrowserWindow({
     width: 380,
-    height: 520,
+    height: 568,
     resizable: false,
     show: false,
     title: 'GifMayker',
@@ -290,6 +290,22 @@ app.on('will-quit', () => globalShortcut.unregisterAll());
 
 // --- IPC ---
 ipcMain.handle('app/version', () => app.getVersion());
+
+// Custom color theme: persist the user's picks and live-apply them to every
+// open window (the renderer derives the full token family from each color).
+function broadcastTheme(theme) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('theme/changed', theme);
+  }
+}
+ipcMain.handle('theme/get', () => settings.load().theme);
+ipcMain.handle('theme/set', (_e, patch) => {
+  const cfg = settings.load();
+  cfg.theme = { ...cfg.theme, ...(patch || {}) };
+  settings.save(cfg);
+  broadcastTheme(cfg.theme);
+  return cfg.theme;
+});
 
 ipcMain.handle('hotkeys/get', () => {
   const { hotkeys } = settings.load();
@@ -656,7 +672,7 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
   return new Promise((resolve) => {
     if (!src || !fs.existsSync(src)) { resolve({ ok: false, error: 'source file not found' }); return; }
     const out = src.replace(/\.webm$/i, '') + '.gif';
-    const w = width === 'orig' ? null : Number(width);
+    const w = Number(width);
 
     // Trim with INPUT seeking: -ss before -i fast-seeks to the nearest keyframe
     // (no decode-and-discard from frame 0), then decodes to the exact frame, and

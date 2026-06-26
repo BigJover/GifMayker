@@ -68,6 +68,11 @@ contextBridge.exposeInMainWorld('gifApp', {
   toGif: (opts) => ipcRenderer.invoke('capture/to-gif', opts),
   onGifProgress: (cb) => ipcRenderer.on('gif/progress', (_e, pct) => cb(pct)),
 
+  // Custom color theme (gold trim / background / text wheels)
+  getTheme: () => ipcRenderer.invoke('theme/get'),
+  setTheme: (patch) => ipcRenderer.invoke('theme/set', patch),
+  onThemeChanged: (cb) => ipcRenderer.on('theme/changed', (_e, theme) => cb(theme)),
+
   // Save location
   getSaveDir: () => ipcRenderer.invoke('savedir/get'),
   openSaveDir: () => ipcRenderer.invoke('savedir/open'),

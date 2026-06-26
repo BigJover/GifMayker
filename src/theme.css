@@ -1,0 +1,91 @@
+/* GifMayker shared theme — single source of truth for design tokens.
+   The "Maykr" imperial palette (gold / ivory / crimson on warm charcoal).
+   Every window links this; colors are referenced as var(--token) so a
+   future custom-theme / background feature is just a matter of overriding
+   these variables (e.g. on a [data-theme] attribute) rather than editing
+   each window's CSS. Keep ONE source of truth here. */
+:root {
+  color-scheme: dark;
+
+  /* surfaces */
+  --bg:            #13100b;  /* window background */
+  --panel:         #211a11;  /* rows / cards */
+  --input:         #1d1710;  /* inputs, selects, tiles */
+  --modal:         #1b150d;  /* modal card */
+  --btn:           #271f12;  /* default button background */
+  --thumb-bg:      #0b0805;  /* thumbnail base */
+
+  /* lines */
+  --border:        #3a3020;  /* panel / tile borders */
+  --border-strong: #473a22;  /* button / input borders */
+  --border-hover:  #8c6f2e;  /* hover / focus border */
+  --border-active: #4e3c1a;  /* active tab / toggle border */
+  --divider:       #2a2316;  /* header / footer dividers */
+
+  /* text */
+  --text:          #ffffff;
+  --muted:         #9a8c66;
+  --muted-2:       #ab9c78;
+  --muted-3:       #bdad84;  /* labels */
+  --muted-4:       #7c7050;  /* faint notes / placeholders */
+
+  /* accent (gold) */
+  --accent:        #d4af37;
+  --accent-soft:   #e7cf8c;  /* soft gold text / active state */
+  --accent-hover:  #c39a2c;
+  --accent-active: #a37f1c;
+  --on-accent:     #1a1407;  /* dark text on a gold fill */
+
+  /* status */
+  --danger:        #b5362c;
+  --warn-text:     #fde68a;
+  --warn-border:   #6b5a18;
+  --warn-bg:       #2a2410;
+
+  /* type */
+  --font: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+/* ---- shared base layout + components ----
+   Rules that were byte-identical across the windows live here so they exist
+   ONCE. Per-window differences (a button's padding, a modal's width, etc.) stay
+   in that window's own <style>, layered on top of these. No visual change —
+   pure de-duplication. */
+body {
+  margin: 0; font-family: var(--font); background: var(--bg); color: var(--text);
+  height: 100vh; display: flex; flex-direction: column; user-select: none;
+}
+header { padding: 16px 20px 12px; border-bottom: 1px solid var(--divider); display: flex; align-items: center; gap: 10px; }
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+header .step { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+main { flex: 1; overflow: auto; padding: 16px 20px; }
+footer { padding: 14px 20px; border-top: 1px solid var(--divider); display: flex; gap: 10px; align-items: center; }
+footer .spacer { margin-left: auto; }
+.muted { font-size: 11.5px; color: var(--muted); }
+
+/* icon button (← back, etc.) */
+.hbtn { background: var(--btn); border: 1px solid var(--border-strong); color: var(--text); border-radius: 8px;
+  width: 30px; height: 28px; font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.hbtn:hover { border-color: var(--border-hover); }
+
+/* footer / action buttons (per-window padding kept in each window) */
+.btn { font-size: 13px; border-radius: 9px; cursor: pointer; border: 1px solid var(--border-strong);
+  background: var(--btn); color: var(--text); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn.ghost { background: transparent; }
+
+/* dropdowns / selects (per-window padding kept in each window) */
+.sel { font-size: 12px; background: var(--input); color: var(--text); border: 1px solid var(--border-strong);
+  border-radius: 8px; cursor: pointer; }
+.sel:hover { border-color: var(--border-hover); }
+
+/* modal shell (per-window card width + head spacing kept in each window) */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
+  align-items: center; justify-content: center; z-index: 50; }
+.modal.show { display: flex; }
+.modal-card { background: var(--modal); border: 1px solid var(--border-strong); border-radius: 14px; padding: 14px 16px 16px; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; font-size: 14px; font-weight: 600; }
+.modal-head .x { background: transparent; border: none; color: var(--muted); font-size: 18px; cursor: pointer; line-height: 1; }
+.modal-head .x:hover { color: var(--text); }

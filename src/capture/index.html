@@ -5,38 +5,27 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; media-src 'self' blob: file:;" />
   <title>Capture</title>
   <link rel="stylesheet" href="../fonts.css" />
+  <link rel="stylesheet" href="../theme.css" />
+  <script src="../theme-apply.js"></script>
   <style>
-    :root { color-scheme: dark; }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #13100b; color: #ffffff; height: 100vh; display: flex; flex-direction: column;
-      user-select: none;
-    }
-    header { padding: 16px 20px 12px; border-bottom: 1px solid #2a2316; display: flex; align-items: center; gap: 10px; }
-    header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-    .hbtn { background: #271f12; border: 1px solid #473a22; color: #ffffff; border-radius: 8px;
-      width: 30px; height: 28px; font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-    .hbtn:hover { border-color: #8c6f2e; }
-    header .step { margin-left: auto; font-size: 11.5px; color: #9a8c66; }
-    main { flex: 1; overflow: auto; padding: 16px 20px; }
+    /* base layout (body/header/main/footer/.hbtn/.muted) is shared in theme.css */
 
     /* permission banner */
-    .perm { background: #2a2410; border: 1px solid #6b5a18; color: #fde68a;
+    .perm { background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-text);
       padding: 12px 14px; border-radius: 10px; font-size: 12.5px; margin-bottom: 14px; display: none; }
     .perm.show { display: block; }
-    .perm button { margin-top: 8px; font-size: 12px; background: #4a3f12; color: #fde68a;
-      border: 1px solid #6b5a18; border-radius: 7px; padding: 6px 11px; cursor: pointer; }
+    .perm button { margin-top: 8px; font-size: 12px; background: #4a3f12; color: var(--warn-text);
+      border: 1px solid var(--warn-border); border-radius: 7px; padding: 6px 11px; cursor: pointer; }
 
     /* source grid */
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
-    .src { border: 1px solid #3a3020; background: #1d1710; border-radius: 11px; overflow: hidden; cursor: pointer; transition: border-color .12s, transform .08s; }
-    .src:hover { border-color: #8c6f2e; }
-    .src.selected { border-color: #d4af37; box-shadow: 0 0 0 1px #d4af37; }
-    .src .thumb { width: 100%; aspect-ratio: 16/10; background: #0b0805 center/cover no-repeat; display: block; }
+    .src { border: 1px solid var(--border); background: var(--input); border-radius: 11px; overflow: hidden; cursor: pointer; transition: border-color .12s, transform .08s; }
+    .src:hover { border-color: var(--border-hover); }
+    .src.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .src .thumb { width: 100%; aspect-ratio: 16/10; background: var(--thumb-bg) center/cover no-repeat; display: block; }
     .src .cap { padding: 8px 10px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
     .src .cap .tagdot { width: 7px; height: 7px; border-radius: 50%; background: #c98a3a; flex: none; }
-    .src .cap .tagdot.win { background: #d4af37; }
+    .src .cap .tagdot.win { background: var(--accent); }
     .src .cap .tagdot.cam { background: #5aa9e6; }
     /* webcam thumbnail placeholder (no live thumb like screens have) */
     .src .thumb.camthumb { display: flex; align-items: center; justify-content: center;
@@ -46,72 +35,67 @@
     /* recording / preview */
     .stage { display: none; flex-direction: column; align-items: center; gap: 14px; }
     .stage.show { display: flex; }
-    video { width: 100%; max-width: 620px; border-radius: 12px; background: #000; border: 1px solid #3a3020; }
+    video { width: 100%; max-width: 620px; border-radius: 12px; background: #000; border: 1px solid var(--border); }
     /* mirror the LIVE webcam self-view only (recorded output stays un-mirrored) */
     video.mirror { transform: scaleX(-1); }
     .gifwrap { width: 100%; max-width: 620px; display: none; flex-direction: column; gap: 6px; }
     .gifwrap.show { display: flex; }
-    .gifwrap img { width: 100%; border-radius: 12px; background: #000; border: 1px solid #d4af37;
+    .gifwrap img { width: 100%; border-radius: 12px; background: #000; border: 1px solid var(--accent);
       /* the checkerboard reveals GIF transparency, like image editors do */
       background-image:
         linear-gradient(45deg,#241d12 25%,transparent 25%), linear-gradient(-45deg,#241d12 25%,transparent 25%),
         linear-gradient(45deg,transparent 75%,#241d12 75%), linear-gradient(-45deg,transparent 75%,#241d12 75%);
       background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
-    .gifwrap .lbl { font-size: 11px; color: #e7cf8c; text-align: center; letter-spacing: .3px; }
+    .gifwrap .lbl { font-size: 11px; color: var(--accent-soft); text-align: center; letter-spacing: .3px; }
     .timer { font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 600; letter-spacing: 1px; }
-    .timer .max { font-size: 13px; color: #9a8c66; font-weight: 400; }
-    .bar { width: 100%; max-width: 620px; height: 6px; background: #2a2316; border-radius: 4px; overflow: hidden; }
-    .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg,#d4af37,#b5362c); }
-    .saved { font-size: 12.5px; color: #d4af37; text-align: center; }
-    .saved code { color: #bdad84; font-size: 11px; }
+    .timer .max { font-size: 13px; color: var(--muted); font-weight: 400; }
+    .bar { width: 100%; max-width: 620px; height: 6px; background: var(--divider); border-radius: 4px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg,var(--accent),var(--danger)); }
+    .saved { font-size: 12.5px; color: var(--accent); text-align: center; }
+    .saved code { color: var(--muted-3); font-size: 11px; }
     .copywrap { position: relative; display: none; align-items: stretch; }
     .copywrap.show { display: inline-flex; }
-    .copybtn { background: #d4af37; border: 1px solid #d4af37; color: #1a1407;
+    .copybtn { background: var(--accent); border: 1px solid var(--accent); color: var(--on-accent);
       font-weight: 700; font-size: 13px; border-radius: 8px 0 0 8px; padding: 10px 16px; cursor: pointer; }
-    .copybtn:hover { background: #c39a2c; }
-    .copybtn.done { background: #a37f1c; }
-    .copycaret { background: #d4af37; border: 1px solid #d4af37; border-left: 1px solid #a37f1c; color: #1a1407;
+    .copybtn:hover { background: var(--accent-hover); }
+    .copybtn.done { background: var(--accent-active); }
+    .copycaret { background: var(--accent); border: 1px solid var(--accent); border-left: 1px solid var(--accent-active); color: var(--on-accent);
       font-size: 12px; border-radius: 0 8px 8px 0; padding: 0 11px; cursor: pointer; }
-    .copycaret:hover { background: #c39a2c; }
+    .copycaret:hover { background: var(--accent-hover); }
     .copymenu { position: absolute; bottom: calc(100% + 6px); left: 0; min-width: 190px;
-      background: #211a11; border: 1px solid #473a22; border-radius: 10px; padding: 5px;
+      background: var(--panel); border: 1px solid var(--border-strong); border-radius: 10px; padding: 5px;
       display: none; box-shadow: 0 -8px 26px rgba(0,0,0,.45); z-index: 10; }
     .copymenu.show { display: block; }
     .cmi { display: block; width: 100%; text-align: left; background: transparent; border: none;
-      color: #ffffff; font-size: 12.5px; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+      color: var(--text); font-size: 12.5px; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
     .cmi:hover { background: #2e2614; }
 
-    footer { padding: 14px 20px; border-top: 1px solid #2a2316; display: flex; gap: 10px; align-items: center; }
-    .btn { font-size: 13px; border-radius: 9px; padding: 10px 16px; cursor: pointer; border: 1px solid #473a22; background: #271f12; color: #ffffff; }
-    .btn:disabled { opacity: .4; cursor: not-allowed; }
-    .btn.primary { background: #d4af37; border-color: #d4af37; color: #1a1407; font-weight: 700; }
+    /* footer/.btn base/.btn.ghost/.muted/.sel base are shared in theme.css; only
+       capture-specific button variants + per-window padding stay here */
+    .btn { padding: 10px 16px; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
     .btn.primary:disabled { background: #4e3c1a; border-color: #4e3c1a; color: #9c8a5e; }
-    .btn.danger { background: #b5362c; border-color: #b5362c; color: #fff; font-weight: 600; }
-    .btn.ghost { background: transparent; }
-    footer .spacer { margin-left: auto; }
-    .muted { font-size: 11.5px; color: #9a8c66; }
-    .sel { font-size: 12px; background: #1d1710; color: #ffffff; border: 1px solid #473a22;
-      border-radius: 8px; padding: 8px 9px; cursor: pointer; }
-    .sel:hover { border-color: #8c6f2e; }
+    .btn.danger { background: var(--danger); border-color: var(--danger); color: var(--text); font-weight: 600; }
+    .sel { padding: 8px 9px; }
     .gifopts { display: none; gap: 8px; align-items: center; }
     .gifopts.show { display: flex; }
 
     /* save-location bar */
     .savebar { padding: 8px 20px; display: flex; align-items: center; gap: 8px;
-      border-bottom: 1px solid #2a2316; font-size: 11.5px; color: #ab9c78; }
-    .savebar .dir { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bdad84; }
-    .mini { font-size: 11px; color: #fff; background: #271f12; border: 1px solid #473a22;
+      border-bottom: 1px solid var(--divider); font-size: 11.5px; color: var(--muted-2); }
+    .savebar .dir { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-3); }
+    .mini { font-size: 11px; color: var(--text); background: var(--btn); border: 1px solid var(--border-strong);
       border-radius: 8px; padding: 5px 9px; cursor: pointer; white-space: nowrap; }
-    .mini:hover { border-color: #8c6f2e; }
+    .mini:hover { border-color: var(--border-hover); }
 
     /* crop overlay */
     .viewport { position: relative; width: 100%; max-width: 620px; line-height: 0; overflow: hidden; border-radius: 12px; }
     .viewport video { display: block; width: 100%; border-radius: 12px; }
-    .cropbox { position: absolute; box-sizing: border-box; border: 2px solid #d4af37;
+    .cropbox { position: absolute; box-sizing: border-box; border: 2px solid var(--accent);
       box-shadow: 0 0 0 9999px rgba(0,0,0,.5); display: none; cursor: move; }
     .cropbox.show { display: block; }
-    .cropbox .grip { position: absolute; width: 14px; height: 14px; background: #d4af37;
-      border: 2px solid #13100b; border-radius: 4px; }
+    .cropbox .grip { position: absolute; width: 14px; height: 14px; background: var(--accent);
+      border: 2px solid var(--bg); border-radius: 4px; }
     .cropbox .grip.nw { left: -8px; top: -8px; cursor: nwse-resize; }
     .cropbox .grip.ne { right: -8px; top: -8px; cursor: nesw-resize; }
     .cropbox .grip.sw { left: -8px; bottom: -8px; cursor: nesw-resize; }
@@ -125,22 +109,22 @@
     .tools { width: 100%; max-width: 620px; display: none; flex-direction: column; gap: 12px; }
     .tools.show { display: flex; }
     .toolrow { display: flex; gap: 8px; align-items: center; }
-    .tbtn { font-size: 12px; background: #271f12; color: #ffffff; border: 1px solid #473a22;
+    .tbtn { font-size: 12px; background: var(--btn); color: var(--text); border: 1px solid var(--border-strong);
       border-radius: 8px; padding: 7px 12px; cursor: pointer; }
-    .tbtn:hover { border-color: #8c6f2e; }
-    .tbtn.on { color: #e7cf8c; background: #2c2110; border-color: #4e3c1a; }
-    .toolrow .tip { font-size: 11px; color: #9a8c66; }
+    .tbtn:hover { border-color: var(--border-hover); }
+    .tbtn.on { color: var(--accent-soft); background: #2c2110; border-color: var(--border-active); }
+    .toolrow .tip { font-size: 11px; color: var(--muted); }
     .trimbar { position: relative; height: 26px; }
-    .trimtrack { position: absolute; top: 11px; left: 0; right: 0; height: 4px; background: #2a2316; border-radius: 2px; }
-    .trimsel { position: absolute; top: 11px; height: 4px; background: #d4af37; border-radius: 2px; }
+    .trimtrack { position: absolute; top: 11px; left: 0; right: 0; height: 4px; background: var(--divider); border-radius: 2px; }
+    .trimsel { position: absolute; top: 11px; height: 4px; background: var(--accent); border-radius: 2px; }
     .trimbar input[type=range] { position: absolute; top: 0; left: 0; width: 100%; height: 26px;
       margin: 0; background: none; -webkit-appearance: none; pointer-events: none; }
     .trimbar input[type=range]::-webkit-slider-runnable-track { background: transparent; height: 26px; }
     .trimbar input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto;
-      width: 13px; height: 22px; margin-top: 2px; border-radius: 4px; background: #ffffff; border: 1px solid #d4af37; cursor: ew-resize; }
-    .trimlbl { display: flex; justify-content: space-between; font-size: 11px; color: #ab9c78;
+      width: 13px; height: 22px; margin-top: 2px; border-radius: 4px; background: var(--text); border: 1px solid var(--accent); cursor: ew-resize; }
+    .trimlbl { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted-2);
       font-variant-numeric: tabular-nums; margin-top: 2px; }
-    .trimlbl .mid { color: #e7cf8c; }
+    .trimlbl .mid { color: var(--accent-soft); }
   </style>
 </head>
 <body>

@@ -5,77 +5,68 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
   <title>GifMayker</title>
   <link rel="stylesheet" href="../fonts.css" />
+  <link rel="stylesheet" href="../theme.css" />
+  <script src="../theme-apply.js"></script>
   <style>
-    :root { color-scheme: dark; }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #13100b;
-      color: #ffffff;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 26px 22px 18px;
-      user-select: none;
-    }
+    body { align-items: center; padding: 26px 22px 18px; } /* base layout shared in theme.css */
     h1 { font-size: 18px; margin: 0 0 3px; font-weight: 650; }
-    .tag { font-size: 12px; color: #ab9c78; margin: 0 0 20px; text-align: center; }
+    .tag { font-size: 12px; color: var(--muted-2); margin: 0 0 20px; text-align: center; }
     .panel { width: 100%; display: flex; flex-direction: column; gap: 10px; }
     .row {
       width: 100%; padding: 13px 14px; border-radius: 12px;
-      border: 1px solid #3a3020; background: #211a11;
+      border: 1px solid var(--border); background: var(--panel);
       display: flex; align-items: center; gap: 11px; transition: background .12s, border-color .12s;
     }
     .row .emoji { font-size: 18px; }
     .row .name { font-size: 14px; font-weight: 550; }
-    .row .sub { font-size: 11px; color: #9a8c66; margin-top: 1px; }
+    .row .sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
     .row .meta { display: flex; flex-direction: column; }
     .row .spacer { margin-left: auto; }
     .chip {
-      font-size: 11.5px; color: #fff; background: #271f12;
-      border: 1px solid #473a22; border-radius: 8px; padding: 5px 9px;
+      font-size: 11.5px; color: var(--text); background: var(--btn);
+      border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 9px;
       cursor: pointer; white-space: nowrap;
     }
-    .chip:hover { border-color: #8c6f2e; }
-    .chip.listening { color: #fde68a; background: #2a2410; border-color: #6b5a18; }
+    .chip:hover { border-color: var(--border-hover); }
+    .chip.listening { color: var(--warn-text); background: var(--warn-bg); border-color: var(--warn-border); }
     .go {
-      font-size: 12px; color: #fff; background: #271f12; border: 1px solid #473a22;
+      font-size: 12px; color: var(--text); background: var(--btn); border: 1px solid var(--border-strong);
       border-radius: 8px; padding: 7px 11px; cursor: pointer;
     }
-    .go:hover { border-color: #8c6f2e; }
+    .go:hover { border-color: var(--border-hover); }
     .toggle {
       font-size: 12px; border-radius: 8px; padding: 7px 14px; cursor: pointer;
-      border: 1px solid #473a22; background: #271f12; color: #fff; min-width: 56px;
+      border: 1px solid var(--border-strong); background: var(--btn); color: var(--text); min-width: 56px;
     }
-    .toggle:hover { border-color: #8c6f2e; }
-    .toggle.on { background: #d4af37; border-color: #d4af37; color: #1a1407; font-weight: 600; }
+    .toggle:hover { border-color: var(--border-hover); }
+    .toggle.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
     .gear { display: flex; align-items: center; justify-content: center; width: 34px; height: 30px;
-      border-radius: 8px; border: 1px solid #473a22; background: #271f12; color: #bdad84; cursor: pointer; }
-    .gear:hover { border-color: #8c6f2e; color: #fff; }
-    .gear.on { color: #d4af37; border-color: #6a5520; }  /* armed indicator */
+      border-radius: 8px; border: 1px solid var(--border-strong); background: var(--btn); color: var(--text); cursor: pointer; }
+    .gear:hover { border-color: var(--border-hover); color: var(--text); }
+    .gear.on { border-color: var(--accent); }  /* armed indicator: trim-colored outline */
     .gear svg { width: 16px; height: 16px; }
-    .sel { font-size: 12px; background: #1d1710; color: #fff; border: 1px solid #473a22;
-      border-radius: 8px; padding: 6px 8px; cursor: pointer; }
-    .sel:hover { border-color: #8c6f2e; }
-    /* settings modal */
-    .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none;
-      align-items: center; justify-content: center; z-index: 50; }
-    .modal.show { display: flex; }
-    .modal-card { width: 300px; background: #1b150d; border: 1px solid #473a22;
-      border-radius: 14px; padding: 14px 16px 16px; }
-    .modal-head { display: flex; align-items: center; justify-content: space-between;
-      font-size: 14px; font-weight: 600; margin-bottom: 6px; }
-    .modal-head .x { background: transparent; border: none; color: #9a8c66; font-size: 18px; cursor: pointer; line-height: 1; }
-    .modal-head .x:hover { color: #fff; }
+    .sel { padding: 6px 8px; } /* .sel base shared in theme.css */
+    /* settings modal — shell shared in theme.css; only window-specific sizing here */
+    .modal-card { width: 300px; }
+    .modal-head { margin-bottom: 6px; }
     .sp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      padding: 10px 0; border-top: 1px solid #2a2316; }
-    .sp-label { font-size: 12.5px; color: #bdad84; }
-    .sp-note { font-size: 10.5px; color: #7c7050; margin: 10px 2px 0; line-height: 1.45; }
-    .row.flash { background: #241d12; border-color: #8c6f2e; }
-    .hint { font-size: 10.5px; color: #7c7050; margin: 12px 2px 0; text-align: center; line-height: 1.5; }
-    .status { margin-top: auto; font-size: 11px; color: #9a8c66; }
+      padding: 10px 0; border-top: 1px solid var(--divider); }
+    .sp-label { font-size: 12.5px; color: var(--muted-3); }
+    .sp-note { font-size: 10.5px; color: var(--muted-4); margin: 10px 2px 0; line-height: 1.45; }
+    .row.flash { background: #241d12; border-color: var(--border-hover); }
+    .hint { font-size: 10.5px; color: var(--muted-4); margin: 12px 2px 0; text-align: center; line-height: 1.5; }
+    /* custom-color wheels */
+    .theme { display: flex; align-items: flex-end; justify-content: center; gap: 14px; margin: 16px 0 2px; }
+    .swatch { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; }
+    .swatch input[type=color] { width: 38px; height: 28px; padding: 0; border: 1px solid var(--border-strong);
+      border-radius: 8px; background: var(--btn); cursor: pointer; }
+    .swatch input[type=color]::-webkit-color-swatch-wrapper { padding: 3px; }
+    .swatch input[type=color]::-webkit-color-swatch { border: none; border-radius: 5px; }
+    .swatch span { font-size: 10px; color: var(--muted); }
+    .theme-reset { font-size: 11px; color: var(--muted); background: transparent; border: none;
+      cursor: pointer; text-decoration: underline; padding: 0 0 5px; }
+    .theme-reset:hover { color: var(--text); }
+    .status { margin-top: auto; font-size: 11px; color: var(--muted); }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
       background: #34d399; margin-right: 6px; vertical-align: middle; }
     .dot.warn { background: #f59e0b; }
@@ -149,6 +140,22 @@
   </div>
 
   <p class="hint">Click a key chip, then press a new shortcut to rebind it.<br>Hotkeys work even when another app is focused.</p>
+
+  <div class="theme">
+    <label class="swatch" title="Gold trim color">
+      <input type="color" id="themeAccent" />
+      <span>Trim</span>
+    </label>
+    <label class="swatch" title="Background color">
+      <input type="color" id="themeBg" />
+      <span>Background</span>
+    </label>
+    <label class="swatch" title="Text color (incl. subtext)">
+      <input type="color" id="themeText" />
+      <span>Text</span>
+    </label>
+    <button class="theme-reset" id="themeReset" title="Reset to default colors">Reset</button>
+  </div>
 
   <div class="status"><span class="dot" id="dot"></span><span id="statusText">Running in the menu bar</span> · <span id="ver">v…</span></div>
 
