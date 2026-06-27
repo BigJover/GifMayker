@@ -95,6 +95,5 @@ footer .spacer { margin-left: auto; }
 .caplayer { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
 .txtcap { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; cursor: move;
   font-family: 'Anton', Impact, sans-serif; line-height: 1; white-space: pre; text-align: center;
-  color: #fff; -webkit-text-stroke: 1px #000; paint-order: stroke fill;
-  text-shadow: 0 1px 2px rgba(0,0,0,.6); user-select: none; padding: 1px 3px; }
+  color: #fff; user-select: none; padding: 1px 3px; }
 .txtcap.sel { outline: 1px dashed var(--accent); outline-offset: 4px; }

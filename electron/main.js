@@ -688,15 +688,14 @@ function ffColor(c) {
 
 // Build one drawtext filter for a caption. Position is the caption's CENTER as a
 // fraction of the output frame, so it tracks what the user placed in the editor.
-// Text comes from a textfile (no fragile inline-text escaping). White-with-black-
-// outline default keeps captions readable over any footage.
+// Text comes from a textfile (no fragile inline-text escaping). No outline — the
+// text is exactly the chosen color (incl. black); readability is the user's call.
 function buildDrawtext(cap) {
   const size = Math.max(8, Math.round(Number(cap.size) || 24));
-  const bw = Math.max(2, Math.round(size / 14)); // outline thickness scales with size
   const fx = (Number(cap.fx) || 0).toFixed(4);
   const fy = (Number(cap.fy) || 0).toFixed(4);
   return `drawtext=fontfile='${ffPath(captionFontPath)}':textfile='${ffPath(cap.textfile)}'` +
-    `:fontsize=${size}:fontcolor=${ffColor(cap.color)}:borderw=${bw}:bordercolor=black@1` +
+    `:fontsize=${size}:fontcolor=${ffColor(cap.color)}` +
     `:x=(w*${fx})-(text_w/2):y=(h*${fy})-(text_h/2)`;
 }
 
