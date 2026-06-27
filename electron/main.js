@@ -773,6 +773,56 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
   });
 });
 
+// Bake text captions into an EXISTING gif → a NEW gif added to the GifBoard.
+// Reuses the same drawtext machinery as capture/to-gif, but with no crop/scale/
+// fps so the original dimensions + frame timing are preserved.
+ipcMain.handle('gif/add-text', (_e, { src, captions = [] }) => {
+  return new Promise((resolve) => {
+    if (!src || !fs.existsSync(src)) { resolve({ ok: false, error: 'source gif not found' }); return; }
+    const caps = Array.isArray(captions) ? captions.filter((c) => c && String(c.text || '').length) : [];
+    if (!caps.length) { resolve({ ok: false, error: 'no text added' }); return; }
+
+    const out = path.join(path.dirname(src), `${path.basename(src).replace(/\.gif$/i, '')}-text-${Date.now()}.gif`);
+    const tmpPaths = [];
+    let drawtexts;
+    try {
+      const tdir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-cap-'));
+      tmpPaths.push(tdir);
+      drawtexts = caps.map((c, i) => {
+        const tf = path.join(tdir, `c${i}.txt`);
+        fs.writeFileSync(tf, String(c.text), 'utf8');
+        tmpPaths.push(tf);
+        return buildDrawtext({ textfile: tf, fx: c.fx, fy: c.fy, size: c.size, color: c.color });
+      });
+    } catch (e) { resolve({ ok: false, error: 'caption setup failed: ' + e.message }); return; }
+    const cleanupTmp = () => { for (const p of tmpPaths) { try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ } } };
+
+    const filter = `${drawtexts.join(',')},split[a][b]` +
+      `;[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
+    let proc;
+    try {
+      proc = spawn(ffmpegPath, ['-y', '-i', src, '-vf', filter, '-loop', '0', out]);
+    } catch (e) { cleanupTmp(); resolve({ ok: false, error: e.message }); return; }
+    let err = '';
+    proc.stderr.on('data', (d) => { err += d.toString(); });
+    proc.on('error', (e) => { cleanupTmp(); resolve({ ok: false, error: e.message }); });
+    proc.on('close', (code) => {
+      cleanupTmp();
+      if (code === 0 && fs.existsSync(out)) {
+        const store = library.load();
+        store.items.unshift({
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+          path: out, name: path.basename(out), addedAt: Date.now(),
+        });
+        library.save(store);
+        resolve({ ok: true, path: out, items: sbList() });
+      } else {
+        resolve({ ok: false, error: `ffmpeg exited ${code}: ${err.slice(-400)}` });
+      }
+    });
+  });
+});
+
 // --- Copy GIF to clipboard (M5) ---
 // Animated GIFs are the tricky case: clipboard.writeImage() flattens to a still
 // PNG. On macOS we instead put the file itself on the pasteboard (public.file-url)

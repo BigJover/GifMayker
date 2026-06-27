@@ -43,7 +43,11 @@
       cursor: pointer; opacity: 0; transition: opacity .12s; z-index: 3; }
     .tile:hover .rm { opacity: 1; }
     .tile .rm:hover { background: var(--danger); }
-    .tile .cap { padding: 7px 9px; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tile .cap { padding: 5px 9px 7px; font-size: 11.5px; display: flex; flex-direction: column; gap: 3px; }
+    .tile .cap .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .capedit { align-self: flex-start; font-size: 10.5px; background: transparent; border: none;
+      color: var(--muted); cursor: pointer; padding: 0; display: flex; align-items: center; gap: 3px; }
+    .capedit:hover { color: var(--accent); }
     .tile.missing { opacity: .55; }
     .tile.missing .cap { color: #d56a4a; }
     /* hover "copy" veil */
@@ -68,6 +72,27 @@
     /* in-app "From Captures" picker — modal shell shared in theme.css */
     .modal-card { width: 92%; max-width: 640px; max-height: 80vh; overflow: auto; }
     .modal-head { margin-bottom: 12px; position: sticky; top: 0; }
+
+    /* text editor (add captions to an existing GIF) */
+    .modal-card.textcard { max-width: 560px; }
+    .texteditcenter { text-align: center; margin-bottom: 12px; }
+    .texteditwrap { display: inline-block; position: relative; line-height: 0; max-width: 100%;
+      border-radius: 10px; overflow: hidden; background: var(--thumb-bg); }
+    .texteditwrap img { max-width: 100%; max-height: 48vh; display: block; }
+    .toolrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .caprow { margin-top: 2px; }
+    .tbtn { font-size: 12px; background: var(--btn); color: var(--text); border: 1px solid var(--border-strong);
+      border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+    .tbtn:hover { border-color: var(--border-hover); }
+    .tbtn:disabled { opacity: .5; cursor: default; }
+    .capinput { flex: 1; min-width: 70px; font-size: 12px; background: var(--input); color: var(--text);
+      border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 9px; }
+    .capinput:disabled { opacity: .45; }
+    .capcolor { width: 30px; height: 28px; padding: 0; border: 1px solid var(--border-strong);
+      border-radius: 7px; background: var(--btn); cursor: pointer; }
+    .capcolor:disabled { opacity: .45; }
+    .textfoot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .textfoot .spacer { margin-left: auto; }
   </style>
 </head>
 <body>
@@ -100,6 +125,32 @@
     <div class="modal-card">
       <div class="modal-head"><span>Add from Captures</span><button class="x" id="capClose" aria-label="Close">×</button></div>
       <div class="grid" id="capGrid"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="textModal">
+    <div class="modal-card textcard">
+      <div class="modal-head"><span>Add text</span><button class="x" id="textClose" aria-label="Close">×</button></div>
+      <div class="texteditcenter">
+        <div class="texteditwrap" id="textStage">
+          <img id="textGif" alt="" draggable="false" />
+          <div class="caplayer" id="textLayer"></div>
+        </div>
+      </div>
+      <div class="toolrow caprow">
+        <button class="tbtn" id="tAddCap">＋ Text</button>
+        <input class="capinput" id="tCapText" type="text" placeholder="Add text, then drag it onto the GIF" disabled />
+        <input type="color" class="capcolor" id="tCapColor" value="#ffffff" disabled title="Text color" />
+        <button class="tbtn" id="tCapSmaller" disabled title="Smaller">A−</button>
+        <button class="tbtn" id="tCapBigger" disabled title="Bigger">A＋</button>
+        <button class="tbtn" id="tCapDel" disabled title="Remove this text">✕</button>
+      </div>
+      <div class="textfoot">
+        <span class="muted" id="textHint">Add text and drag it onto the GIF.</span>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="textCancel">Cancel</button>
+        <button class="btn primary" id="textSave">Save as new GIF</button>
+      </div>
     </div>
   </div>
 

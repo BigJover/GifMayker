@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('gifApp', {
   sbList: () => ipcRenderer.invoke('sb/list'),
   sbImport: (opts) => ipcRenderer.invoke('sb/import', opts),
   sbAdd: (file) => ipcRenderer.invoke('sb/add', file),
+  addTextToGif: (src, captions) => ipcRenderer.invoke('gif/add-text', { src, captions }),
   sbRemove: (id) => ipcRenderer.invoke('sb/remove', id),
   listCaptureGifs: () => ipcRenderer.invoke('captures/list-gifs'),
   deleteCaptureGif: (file) => ipcRenderer.invoke('captures/delete-gif', file),
