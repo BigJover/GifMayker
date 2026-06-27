@@ -28,3 +28,14 @@
   font-display: swap;
   src: url('fonts/fira-sans-700.woff2') format('woff2');
 }
+
+/* Anton — bold condensed display face (SIL OFL), the standard free meme/caption
+   font. Used for editor text overlays; the same .ttf is read by ffmpeg drawtext
+   at export so the baked GIF matches the preview. */
+@font-face {
+  font-family: 'Anton';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/Anton-Regular.ttf') format('truetype');
+}

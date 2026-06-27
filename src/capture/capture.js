@@ -23,6 +23,15 @@ let cropRatio = null;  // null = free form; otherwise width/height
 let drag = null;
 let loopTimer = null;  // drives the trimmed-region preview loop
 
+// text-caption state: each = {id, text, fx, fy, sizeFrac, color, el}
+// fx/fy = CENTER position as a fraction (0..1) of the OUTPUT region (the crop
+// region when cropping, else the full frame); sizeFrac = font size as a fraction
+// of that region's height. Stored as fractions so they map cleanly to output px.
+let captions = [];
+let selCap = null;
+let capDrag = null;
+let capSeq = 0;
+
 // ---- permission + sources ----
 async function init() {
   $('permBtn').addEventListener('click', () => window.gifApp.openScreenPrefs());
@@ -277,7 +286,7 @@ async function makeGif() {
   $('gifout').style.color = '';
   let res;
   try {
-    res = await window.gifApp.toGif({ src: lastSavedPath, fps, width, trim, crop, speed, outSeconds });
+    res = await window.gifApp.toGif({ src: lastSavedPath, fps, width, trim, crop, speed, outSeconds, captions: captionPayload() });
   } catch (e) {
     res = { ok: false, error: e.message };
   }
@@ -311,6 +320,7 @@ function resetToPicker() {
   selected = null;
   lastSavedBlob = null;
   lastSavedPath = null;
+  clearCaptions();
   $('preview').src = '';
   $('preview').srcObject = null;
   $('preview').style.display = '';
@@ -358,6 +368,7 @@ function resetToPicker() {
 function initEditor() {
   const v = $('preview');
   videoW = v.videoWidth; videoH = v.videoHeight;
+  clearCaptions();
   // MediaRecorder WebM often reports duration=Infinity until forced to seek.
   resolveDuration(v, (dur) => {
     clipDuration = isFinite(dur) && dur > 0 ? dur : 0;
@@ -471,6 +482,7 @@ function toggleCrop() {
   $('cropToggle').textContent = cropOn ? '▣ Crop: On' : '▢ Crop: Off';
   if (cropOn) { setCropDefault(); if (cropRatio) fitBoxToAspect(); }
   updateEstimate();
+  renderCaptions(); // region switched between full-frame and crop box
 }
 
 function ratioVal(s) { const [a, b] = s.split(':').map(Number); return a / b; }
@@ -480,6 +492,7 @@ function applyAspect() {
   cropRatio = v === 'free' ? null : ratioVal(v);
   if (cropOn && cropRatio) fitBoxToAspect();
   updateEstimate();
+  renderCaptions();
 }
 
 // Reshape the current box to the locked ratio, kept centered and inside bounds.
@@ -592,6 +605,7 @@ function endDrag() {
   document.removeEventListener('mousemove', onDrag);
   document.removeEventListener('mouseup', endDrag);
   updateEstimate(); // crop region changed → refresh estimate
+  renderCaptions(); // keep captions aligned to the new crop region
 }
 
 function cropRect() {
@@ -630,6 +644,101 @@ function outputDims() {
   if (!bw) return { w: bw, h: bh };
   const w = Number(sel);
   return { w, h: Math.round(w * bh / bw) };
+}
+
+// ---- text captions ----
+// The output region (in viewport px) that becomes the GIF frame: the crop box
+// when cropping, else the whole preview. Captions are placed relative to it.
+function outputRegion() {
+  const vp = $('viewport');
+  if (cropOn) {
+    const b = $('cropbox');
+    return { L: b.offsetLeft, T: b.offsetTop, W: b.offsetWidth, H: b.offsetHeight };
+  }
+  return { L: 0, T: 0, W: vp.clientWidth, H: vp.clientHeight };
+}
+
+function renderCaptions() {
+  const r = outputRegion();
+  for (const c of captions) {
+    if (!c.el) continue;
+    c.el.style.left = (r.L + c.fx * r.W) + 'px';
+    c.el.style.top = (r.T + c.fy * r.H) + 'px';
+    c.el.style.fontSize = Math.max(8, Math.round(c.sizeFrac * r.H)) + 'px';
+    c.el.style.color = c.color;
+    c.el.textContent = c.text || ' ';
+    c.el.classList.toggle('sel', c === selCap);
+  }
+}
+
+function addCaption() {
+  const c = { id: ++capSeq, text: 'TEXT', fx: 0.5, fy: 0.15, sizeFrac: 0.12, color: '#ffffff' };
+  const el = document.createElement('div');
+  el.className = 'txtcap';
+  el.addEventListener('mousedown', (e) => startCapDrag(e, c));
+  $('capLayer').appendChild(el);
+  c.el = el;
+  captions.push(c);
+  selectCaption(c);
+  $('capText').focus();
+  $('capText').select();
+}
+
+function selectCaption(c) {
+  selCap = c || null;
+  const on = !!selCap;
+  for (const id of ['capText', 'capColor', 'capSmaller', 'capBigger', 'capDel']) $(id).disabled = !on;
+  if (on) { $('capText').value = selCap.text; $('capColor').value = selCap.color; }
+  else { $('capText').value = ''; }
+  renderCaptions();
+}
+
+function deleteCaption(c) {
+  c = c || selCap;
+  if (!c) return;
+  if (c.el) c.el.remove();
+  captions = captions.filter((x) => x !== c);
+  selectCaption(captions[captions.length - 1] || null);
+}
+
+function clearCaptions() {
+  for (const c of captions) if (c.el) c.el.remove();
+  captions = [];
+  selectCaption(null);
+}
+
+function startCapDrag(e, c) {
+  e.preventDefault();
+  e.stopPropagation();
+  selectCaption(c);
+  capDrag = { c, r: outputRegion() };
+  document.addEventListener('mousemove', onCapDrag);
+  document.addEventListener('mouseup', endCapDrag);
+}
+
+function onCapDrag(e) {
+  if (!capDrag) return;
+  const vp = $('viewport').getBoundingClientRect();
+  const r = capDrag.r;
+  capDrag.c.fx = Math.max(0, Math.min(1, (e.clientX - vp.left - r.L) / r.W));
+  capDrag.c.fy = Math.max(0, Math.min(1, (e.clientY - vp.top - r.T) / r.H));
+  renderCaptions();
+}
+
+function endCapDrag() {
+  capDrag = null;
+  document.removeEventListener('mousemove', onCapDrag);
+  document.removeEventListener('mouseup', endCapDrag);
+}
+
+// Map captions → the payload ffmpeg drawtext needs: font size in OUTPUT pixels
+// (size fraction × output height) plus the center fractions + color.
+function captionPayload() {
+  if (!captions.length) return [];
+  const out = outputDims();
+  return captions
+    .filter((c) => String(c.text || '').trim().length)
+    .map((c) => ({ text: c.text, fx: c.fx, fy: c.fy, size: Math.round(c.sizeFrac * out.h), color: c.color }));
 }
 
 function updateEstimate() {
@@ -738,8 +847,17 @@ $('miReveal').addEventListener('click', () => { $('copyMenu').classList.remove('
 $('trimStart').addEventListener('input', () => onTrimInput('start'));
 $('trimEnd').addEventListener('input', () => onTrimInput('end'));
 $('cropToggle').addEventListener('click', toggleCrop);
-$('cropReset').addEventListener('click', () => { setCropDefault(); if (cropRatio) fitBoxToAspect(); updateEstimate(); });
+$('cropReset').addEventListener('click', () => { setCropDefault(); if (cropRatio) fitBoxToAspect(); updateEstimate(); renderCaptions(); });
 $('cropAspect').addEventListener('change', applyAspect);
+
+// text captions
+$('addCap').addEventListener('click', addCaption);
+$('capText').addEventListener('input', () => { if (selCap) { selCap.text = $('capText').value; renderCaptions(); } });
+$('capColor').addEventListener('input', () => { if (selCap) { selCap.color = $('capColor').value; renderCaptions(); } });
+$('capSmaller').addEventListener('click', () => { if (selCap) { selCap.sizeFrac = Math.max(0.04, selCap.sizeFrac - 0.02); renderCaptions(); } });
+$('capBigger').addEventListener('click', () => { if (selCap) { selCap.sizeFrac = Math.min(0.6, selCap.sizeFrac + 0.02); renderCaptions(); } });
+$('capDel').addEventListener('click', () => deleteCaption());
+window.addEventListener('resize', renderCaptions);
 $('gifSize').addEventListener('change', updateEstimate);
 $('gifFps').addEventListener('change', updateEstimate);
 $('gifSpeed').addEventListener('change', () => { applySpeed(); updateEstimate(); });

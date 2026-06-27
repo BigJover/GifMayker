@@ -11,6 +11,10 @@ const { spawn } = require('child_process');
 // In a packaged build the binary is unpacked beside the asar (see asarUnpack),
 // so rewrite the path; in dev it resolves to node_modules unchanged.
 const ffmpegPath = require('ffmpeg-static').replace('app.asar', 'app.asar.unpacked');
+// Caption font for ffmpeg drawtext. Like the ffmpeg binary it must live OUTSIDE
+// the asar (see asarUnpack) because ffmpeg reads it as a real file off disk.
+const captionFontPath = path.join(__dirname, '..', 'src', 'fonts', 'Anton-Regular.ttf')
+  .replace('app.asar', 'app.asar.unpacked');
 const settings = require('./settings');
 const library = require('./library');
 
@@ -657,22 +661,71 @@ ipcMain.handle('savedir/choose', async () => {
 // Two-stage palette encode in a single ffmpeg pass: palettegen builds an
 // optimal 256-color table from the clip, paletteuse maps frames to it with
 // dithering. This is what makes the GIF look clean instead of banded.
-function gifFilter(fps, width, crop, speed) {
-  // crop (source pixels) → speed (retime) → fps drop → scale → palette.
+function gifFilter(fps, width, crop, speed, drawtexts) {
+  // crop (source pixels) → speed (retime) → fps drop → scale → TEXT → palette.
+  // Text overlays go AFTER scale so they render at output resolution (crisp) and
+  // BEFORE the palette split so palettegen accounts for the text colors.
   const cropF = crop ? `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},` : '';
   // setpts=PTS/speed: >1 speeds up, <1 slows down (e.g. 0.25 = 4× longer).
   const speedF = (speed && speed !== 1) ? `setpts=PTS/${speed},` : '';
   const scale = width ? `scale=${width}:-1:flags=lanczos,` : '';
-  return `${cropF}${speedF}fps=${fps},${scale}split[s0][s1]` +
+  const textF = drawtexts && drawtexts.length ? drawtexts.join(',') + ',' : '';
+  return `${cropF}${speedF}fps=${fps},${scale}${textF}split[s0][s1]` +
     `;[s0]palettegen=stats_mode=diff[p]` +
     `;[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
 }
 
-ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null, crop = null, speed = 1, outSeconds = 0 }) => {
+// Escape a file path for use inside a single-quoted ffmpeg filtergraph value.
+// Forward slashes work on every OS, and inside single quotes a Windows drive
+// colon (C:) is literal — so we only need to neutralise backslashes + quotes.
+function ffPath(p) { return String(p).replace(/\\/g, '/').replace(/'/g, "\\'"); }
+
+// "#rrggbb" → ffmpeg "0xrrggbb"; anything unparseable falls back to white.
+function ffColor(c) {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(String(c || '').trim());
+  return m ? '0x' + m[1].toLowerCase() : 'white';
+}
+
+// Build one drawtext filter for a caption. Position is the caption's CENTER as a
+// fraction of the output frame, so it tracks what the user placed in the editor.
+// Text comes from a textfile (no fragile inline-text escaping). White-with-black-
+// outline default keeps captions readable over any footage.
+function buildDrawtext(cap) {
+  const size = Math.max(8, Math.round(Number(cap.size) || 24));
+  const bw = Math.max(2, Math.round(size / 14)); // outline thickness scales with size
+  const fx = (Number(cap.fx) || 0).toFixed(4);
+  const fy = (Number(cap.fy) || 0).toFixed(4);
+  return `drawtext=fontfile='${ffPath(captionFontPath)}':textfile='${ffPath(cap.textfile)}'` +
+    `:fontsize=${size}:fontcolor=${ffColor(cap.color)}:borderw=${bw}:bordercolor=black@1` +
+    `:x=(w*${fx})-(text_w/2):y=(h*${fy})-(text_h/2)`;
+}
+
+ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null, crop = null, speed = 1, outSeconds = 0, captions = [] }) => {
   return new Promise((resolve) => {
     if (!src || !fs.existsSync(src)) { resolve({ ok: false, error: 'source file not found' }); return; }
     const out = src.replace(/\.webm$/i, '') + '.gif';
     const w = Number(width);
+
+    // Text overlays: write each caption's text to a temp file (drawtext textfile=)
+    // and build its filter. tmpPaths are cleaned up once ffmpeg finishes.
+    const tmpPaths = [];
+    let drawtexts = [];
+    try {
+      const caps = Array.isArray(captions) ? captions.filter((c) => c && String(c.text || '').length) : [];
+      if (caps.length) {
+        const tdir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-cap-'));
+        tmpPaths.push(tdir);
+        drawtexts = caps.map((c, i) => {
+          const tf = path.join(tdir, `c${i}.txt`);
+          fs.writeFileSync(tf, String(c.text), 'utf8');
+          tmpPaths.push(tf);
+          return buildDrawtext({ textfile: tf, fx: c.fx, fy: c.fy, size: c.size, color: c.color });
+        });
+      }
+    } catch { drawtexts = []; } // captions are best-effort; never block the GIF
+    const cleanupTmp = () => {
+      for (const p of tmpPaths) { try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ } }
+    };
 
     // Trim with INPUT seeking: -ss before -i fast-seeks to the nearest keyframe
     // (no decode-and-discard from frame 0), then decodes to the exact frame, and
@@ -685,12 +738,13 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
       preInput.push('-ss', String(trim.start || 0));
       postInput.push('-t', String(trim.duration));
     }
-    const args = ['-y', ...preInput, '-i', src, ...postInput, '-vf', gifFilter(Number(fps), w, crop, Number(speed)), '-loop', '0', out];
+    const args = ['-y', ...preInput, '-i', src, ...postInput, '-vf', gifFilter(Number(fps), w, crop, Number(speed), drawtexts), '-loop', '0', out];
 
     let proc;
     try {
       proc = spawn(ffmpegPath, args);
     } catch (e) {
+      cleanupTmp();
       resolve({ ok: false, error: e.message });
       return;
     }
@@ -707,8 +761,9 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
         }
       }
     });
-    proc.on('error', (e) => resolve({ ok: false, error: e.message }));
+    proc.on('error', (e) => { cleanupTmp(); resolve({ ok: false, error: e.message }); });
     proc.on('close', (code) => {
+      cleanupTmp();
       if (code === 0 && fs.existsSync(out)) {
         resolve({ ok: true, path: out, bytes: fs.statSync(out).size });
       } else {

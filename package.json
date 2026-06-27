@@ -1,6 +1,6 @@
 {
   "name": "gifmayker",
-  "version": "0.1.39",
+  "version": "0.1.40",
   "private": true,
   "description": "Make-your-own GIF tool — capture, trim, GIF, soundboard (desktop, Electron)",
   "main": "electron/main.js",
@@ -25,7 +25,8 @@
     "productName": "GifMayker",
     "asar": true,
     "asarUnpack": [
-      "**/node_modules/ffmpeg-static/**"
+      "**/node_modules/ffmpeg-static/**",
+      "src/fonts/Anton-Regular.ttf"
     ],
     "afterPack": "./build/afterPack.js",
     "files": [
