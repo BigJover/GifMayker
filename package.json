@@ -1,6 +1,6 @@
 {
   "name": "gifmayker",
-  "version": "0.1.42",
+  "version": "0.1.43",
   "private": true,
   "description": "Make-your-own GIF tool — capture, trim, GIF, soundboard (desktop, Electron)",
   "main": "electron/main.js",

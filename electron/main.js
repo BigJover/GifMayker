@@ -675,11 +675,6 @@ function gifFilter(fps, width, crop, speed, drawtexts) {
     `;[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
 }
 
-// Escape a file path for use inside a single-quoted ffmpeg filtergraph value.
-// Forward slashes work on every OS, and inside single quotes a Windows drive
-// colon (C:) is literal — so we only need to neutralise backslashes + quotes.
-function ffPath(p) { return String(p).replace(/\\/g, '/').replace(/'/g, "\\'"); }
-
 // "#rrggbb" → ffmpeg "0xrrggbb"; anything unparseable falls back to white.
 function ffColor(c) {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(String(c || '').trim());
@@ -687,14 +682,18 @@ function ffColor(c) {
 }
 
 // Build one drawtext filter for a caption. Position is the caption's CENTER as a
-// fraction of the output frame, so it tracks what the user placed in the editor.
-// Text comes from a textfile (no fragile inline-text escaping). No outline — the
-// text is exactly the chosen color (incl. black); readability is the user's call.
+// fraction of the output frame. Text comes from a textfile (no inline-text
+// escaping). CROSS-PLATFORM RULE: fontfile/textfile are referenced by BARE
+// FILENAME — ffmpeg is run with cwd = the temp dir holding font.ttf + the c*.txt
+// files. A Windows absolute path (D:\…) puts a drive colon inside the filtergraph
+// that drawtext mis-splits into a stray positional `text` option ("Both text and
+// text file provided"); bare names have no colon, so it works on Windows + macOS.
+// No outline — text is exactly the chosen color (incl. black).
 function buildDrawtext(cap) {
   const size = Math.max(8, Math.round(Number(cap.size) || 24));
   const fx = (Number(cap.fx) || 0).toFixed(4);
   const fy = (Number(cap.fy) || 0).toFixed(4);
-  return `drawtext=fontfile='${ffPath(captionFontPath)}':textfile='${ffPath(cap.textfile)}'` +
+  return `drawtext=fontfile=font.ttf:textfile=${cap.textfile}` +
     `:fontsize=${size}:fontcolor=${ffColor(cap.color)}` +
     `:x=(w*${fx})-(text_w/2):y=(h*${fy})-(text_h/2)`;
 }
@@ -709,19 +708,20 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
     // and build its filter. tmpPaths are cleaned up once ffmpeg finishes.
     const tmpPaths = [];
     let drawtexts = [];
+    let capDir = null; // temp dir with font.ttf + c*.txt; ffmpeg runs with cwd here so the filter uses bare names
     try {
       const caps = Array.isArray(captions) ? captions.filter((c) => c && String(c.text || '').length) : [];
       if (caps.length) {
-        const tdir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-cap-'));
-        tmpPaths.push(tdir);
+        capDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-cap-'));
+        tmpPaths.push(capDir);
+        fs.copyFileSync(captionFontPath, path.join(capDir, 'font.ttf'));
         drawtexts = caps.map((c, i) => {
-          const tf = path.join(tdir, `c${i}.txt`);
-          fs.writeFileSync(tf, String(c.text), 'utf8');
-          tmpPaths.push(tf);
-          return buildDrawtext({ textfile: tf, fx: c.fx, fy: c.fy, size: c.size, color: c.color });
+          const name = `c${i}.txt`;
+          fs.writeFileSync(path.join(capDir, name), String(c.text), 'utf8');
+          return buildDrawtext({ textfile: name, fx: c.fx, fy: c.fy, size: c.size, color: c.color });
         });
       }
-    } catch { drawtexts = []; } // captions are best-effort; never block the GIF
+    } catch { drawtexts = []; capDir = null; } // captions are best-effort; never block the GIF
     const cleanupTmp = () => {
       for (const p of tmpPaths) { try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ } }
     };
@@ -741,7 +741,7 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
 
     let proc;
     try {
-      proc = spawn(ffmpegPath, args);
+      proc = spawn(ffmpegPath, args, capDir ? { cwd: capDir } : undefined);
     } catch (e) {
       cleanupTmp();
       resolve({ ok: false, error: e.message });
@@ -783,15 +783,15 @@ ipcMain.handle('gif/add-text', (_e, { src, captions = [] }) => {
 
     const out = path.join(path.dirname(src), `${path.basename(src).replace(/\.gif$/i, '')}-text-${Date.now()}.gif`);
     const tmpPaths = [];
-    let drawtexts;
+    let drawtexts, capDir;
     try {
-      const tdir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-cap-'));
-      tmpPaths.push(tdir);
+      capDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-cap-'));
+      tmpPaths.push(capDir);
+      fs.copyFileSync(captionFontPath, path.join(capDir, 'font.ttf'));
       drawtexts = caps.map((c, i) => {
-        const tf = path.join(tdir, `c${i}.txt`);
-        fs.writeFileSync(tf, String(c.text), 'utf8');
-        tmpPaths.push(tf);
-        return buildDrawtext({ textfile: tf, fx: c.fx, fy: c.fy, size: c.size, color: c.color });
+        const name = `c${i}.txt`;
+        fs.writeFileSync(path.join(capDir, name), String(c.text), 'utf8');
+        return buildDrawtext({ textfile: name, fx: c.fx, fy: c.fy, size: c.size, color: c.color });
       });
     } catch (e) { resolve({ ok: false, error: 'caption setup failed: ' + e.message }); return; }
     const cleanupTmp = () => { for (const p of tmpPaths) { try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ } } };
@@ -800,7 +800,7 @@ ipcMain.handle('gif/add-text', (_e, { src, captions = [] }) => {
       `;[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
     let proc;
     try {
-      proc = spawn(ffmpegPath, ['-y', '-i', src, '-vf', filter, '-loop', '0', out]);
+      proc = spawn(ffmpegPath, ['-y', '-i', src, '-vf', filter, '-loop', '0', out], { cwd: capDir });
     } catch (e) { cleanupTmp(); resolve({ ok: false, error: e.message }); return; }
     let err = '';
     proc.stderr.on('data', (d) => { err += d.toString(); });
