@@ -18,7 +18,7 @@
       border: 1px solid var(--warn-border); border-radius: 7px; padding: 6px 11px; cursor: pointer; }
 
     /* source grid */
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
     .src { border: 1px solid var(--border); background: var(--input); border-radius: 11px; overflow: hidden; cursor: pointer; transition: border-color .12s, transform .08s; }
     .src:hover { border-color: var(--border-hover); }
     .src.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -35,10 +35,10 @@
     /* recording / preview */
     .stage { display: none; flex-direction: column; align-items: center; gap: 14px; }
     .stage.show { display: flex; }
-    video { width: 100%; max-width: 620px; border-radius: 12px; background: #000; border: 1px solid var(--border); }
+    video { width: 100%; max-width: 880px; border-radius: 12px; background: #000; border: 1px solid var(--border); }
     /* mirror the LIVE webcam self-view only (recorded output stays un-mirrored) */
     video.mirror { transform: scaleX(-1); }
-    .gifwrap { width: 100%; max-width: 620px; display: none; flex-direction: column; gap: 6px; }
+    .gifwrap { width: 100%; max-width: 880px; display: none; flex-direction: column; gap: 6px; }
     .gifwrap.show { display: flex; }
     .gifwrap img { width: 100%; border-radius: 12px; background: #000; border: 1px solid var(--accent);
       /* the checkerboard reveals GIF transparency, like image editors do */
@@ -49,7 +49,7 @@
     .gifwrap .lbl { font-size: 11px; color: var(--accent-soft); text-align: center; letter-spacing: .3px; }
     .timer { font-variant-numeric: tabular-nums; font-size: 26px; font-weight: 600; letter-spacing: 1px; }
     .timer .max { font-size: 13px; color: var(--muted); font-weight: 400; }
-    .bar { width: 100%; max-width: 620px; height: 6px; background: var(--divider); border-radius: 4px; overflow: hidden; }
+    .bar { width: 100%; max-width: 880px; height: 6px; background: var(--divider); border-radius: 4px; overflow: hidden; }
     .bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg,var(--accent),var(--danger)); }
     .saved { font-size: 12.5px; color: var(--accent); text-align: center; }
     .saved code { color: var(--muted-3); font-size: 11px; }
@@ -89,7 +89,7 @@
     .mini:hover { border-color: var(--border-hover); }
 
     /* crop overlay */
-    .viewport { position: relative; width: 100%; max-width: 620px; line-height: 0; overflow: hidden; border-radius: 12px; }
+    .viewport { position: relative; width: 100%; max-width: 880px; line-height: 0; overflow: hidden; border-radius: 12px; }
     .viewport video { display: block; width: 100%; border-radius: 12px; }
     .cropbox { position: absolute; box-sizing: border-box; border: 2px solid var(--accent);
       box-shadow: 0 0 0 9999px rgba(0,0,0,.5); display: none; cursor: move; }
@@ -106,7 +106,7 @@
     .cropbox .grip.w { left: -8px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
 
     /* trim + tools */
-    .tools { width: 100%; max-width: 620px; display: none; flex-direction: column; gap: 12px; }
+    .tools { width: 100%; max-width: 880px; display: none; flex-direction: column; gap: 8px; }
     .tools.show { display: flex; }
     .toolrow { display: flex; gap: 8px; align-items: center; }
     .tbtn { font-size: 12px; background: var(--btn); color: var(--text); border: 1px solid var(--border-strong);
@@ -178,7 +178,6 @@
             <option value="9:16">9:16</option>
           </select>
           <button class="tbtn" id="cropReset" style="display:none">Reset</button>
-          <span class="tip">Trim &amp; crop apply to the source video below ↓</span>
         </div>
         <div class="trim">
           <div class="trimbar">
@@ -195,11 +194,29 @@
         </div>
         <div class="toolrow caprow">
           <button class="tbtn" id="addCap">＋ Text</button>
-          <input class="capinput" id="capText" type="text" placeholder="Add text, then drag it on the video" disabled />
+          <input class="capinput" id="capText" type="text" placeholder="Add text…" disabled />
           <input type="color" class="capcolor" id="capColor" value="#ffffff" disabled title="Text color" />
           <button class="tbtn" id="capSmaller" disabled title="Smaller">A−</button>
           <button class="tbtn" id="capBigger" disabled title="Bigger">A＋</button>
           <button class="tbtn" id="capDel" disabled title="Remove this text">✕</button>
+        </div>
+        <div class="toolrow skrow">
+          <button class="tbtn" id="stickerToggle">＋ Sticker</button>
+          <button class="tbtn" id="skDel" disabled title="Remove this sticker">✕</button>
+          <label class="skopt" title="Lock aspect ratio while resizing"><input type="checkbox" id="skUniform" checked /> Uniform</label>
+          <span class="layerctl">
+            <button class="tbtn" id="layerForward" disabled title="Bring selected layer forward">▲</button>
+            <button class="tbtn" id="layerBack" disabled title="Send selected layer back">▼</button>
+          </span>
+        </div>
+        <div class="sktray" id="skTray" style="display:none"></div>
+        <div class="toolrow barrow">
+          <span class="tip">Bars:</span>
+          <button class="tbtn" id="barTopBtn" title="Toggle a black bar at the top">▭ Top</button>
+          <button class="tbtn" id="barBottomBtn" title="Toggle a black bar at the bottom">▭ Bottom</button>
+          <button class="tbtn" id="barLeftBtn" title="Toggle a black bar on the left">▭ Left</button>
+          <button class="tbtn" id="barRightBtn" title="Toggle a black bar on the right">▭ Right</button>
+          <button class="tbtn" id="barEqualBtn" title="Make top/bottom equal and left/right equal">⇿ Equalize</button>
         </div>
       </div>
 
@@ -215,7 +232,13 @@
           <span class="grip e" data-corner="e"></span>
           <span class="grip w" data-corner="w"></span>
         </div>
-        <div class="caplayer" id="capLayer"></div>
+        <div class="barslayer" id="barsLayer">
+          <div class="bar top" id="barTop"><span class="baredge"></span></div>
+          <div class="bar bottom" id="barBottom"><span class="baredge"></span></div>
+          <div class="bar left" id="barLeft"><span class="baredge"></span></div>
+          <div class="bar right" id="barRight"><span class="baredge"></span></div>
+        </div>
+        <div class="overlaylayer" id="overlayLayer"></div>
       </div>
 
       <div class="gifwrap" id="gifwrap">

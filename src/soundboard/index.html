@@ -24,7 +24,7 @@
     .fchip.on { color: var(--accent-soft); background: #2c2110; border-color: var(--border-active); }
 
     /* GIF grid */
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
     .tile { position: relative; border: 1px solid var(--border); background: var(--input); border-radius: 12px;
       overflow: hidden; cursor: pointer; transition: border-color .12s, transform .08s; }
     .tile:hover { border-color: var(--border-hover); transform: translateY(-1px); }
@@ -74,25 +74,32 @@
     .modal-head { margin-bottom: 12px; position: sticky; top: 0; }
 
     /* text editor (add captions to an existing GIF) */
-    .modal-card.textcard { max-width: 560px; }
-    .texteditcenter { text-align: center; margin-bottom: 12px; }
+    .modal-card.textcard { max-width: 860px; }
+    .texteditcenter { text-align: center; margin-bottom: 8px; }
     .texteditwrap { display: inline-block; position: relative; line-height: 0; max-width: 100%;
       border-radius: 10px; overflow: hidden; background: var(--thumb-bg); }
-    .texteditwrap img { max-width: 100%; max-height: 48vh; display: block; }
-    .toolrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .caprow { margin-top: 2px; }
+    /* fixed height → every GIF previews at the same size (width follows aspect) */
+    .texteditwrap img { height: 56vh; width: auto; max-width: 100%; display: block; }
+    .toolrow { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+    .caprow { margin-top: 0; }
+    .skrow, .barrow { margin-top: 5px; }
+    .toolrow .tip { font-size: 11px; color: var(--muted); }
+    .sktray { margin-top: 4px; }
     .tbtn { font-size: 12px; background: var(--btn); color: var(--text); border: 1px solid var(--border-strong);
       border-radius: 8px; padding: 7px 12px; cursor: pointer; }
     .tbtn:hover { border-color: var(--border-hover); }
     .tbtn:disabled { opacity: .5; cursor: default; }
+    .tbtn.on { color: var(--accent-soft); background: #2c2110; border-color: var(--border-active); }
     .capinput { flex: 1; min-width: 70px; font-size: 12px; background: var(--input); color: var(--text);
       border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 9px; }
     .capinput:disabled { opacity: .45; }
     .capcolor { width: 30px; height: 28px; padding: 0; border: 1px solid var(--border-strong);
       border-radius: 7px; background: var(--btn); cursor: pointer; }
     .capcolor:disabled { opacity: .45; }
-    .textfoot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
-    .textfoot .spacer { margin-left: auto; }
+    .toolrow .spacer { margin-left: auto; }
+    .barrow #textHint { font-size: 11px; }
+    /* Cancel/Save share the bars row; keep them compact so it stays one line */
+    .barrow .btn { padding: 8px 14px; }
   </style>
 </head>
 <body>
@@ -130,23 +137,45 @@
 
   <div class="modal" id="textModal">
     <div class="modal-card textcard">
-      <div class="modal-head"><span>Add text</span><button class="x" id="textClose" aria-label="Close">×</button></div>
+      <div class="modal-head"><span>Edit GIF</span><button class="x" id="textClose" aria-label="Close">×</button></div>
       <div class="texteditcenter">
         <div class="texteditwrap" id="textStage">
           <img id="textGif" alt="" draggable="false" />
-          <div class="caplayer" id="textLayer"></div>
+          <div class="barslayer" id="tBarsLayer">
+            <div class="bar top" id="tBarTop"><span class="baredge"></span></div>
+            <div class="bar bottom" id="tBarBottom"><span class="baredge"></span></div>
+            <div class="bar left" id="tBarLeft"><span class="baredge"></span></div>
+            <div class="bar right" id="tBarRight"><span class="baredge"></span></div>
+          </div>
+          <div class="overlaylayer" id="textOverlay"></div>
         </div>
       </div>
       <div class="toolrow caprow">
         <button class="tbtn" id="tAddCap">＋ Text</button>
-        <input class="capinput" id="tCapText" type="text" placeholder="Add text, then drag it onto the GIF" disabled />
+        <input class="capinput" id="tCapText" type="text" placeholder="Add text…" disabled />
         <input type="color" class="capcolor" id="tCapColor" value="#ffffff" disabled title="Text color" />
         <button class="tbtn" id="tCapSmaller" disabled title="Smaller">A−</button>
         <button class="tbtn" id="tCapBigger" disabled title="Bigger">A＋</button>
         <button class="tbtn" id="tCapDel" disabled title="Remove this text">✕</button>
       </div>
-      <div class="textfoot">
-        <span class="muted" id="textHint">Add text and drag it onto the GIF.</span>
+      <div class="toolrow skrow">
+        <button class="tbtn" id="tStickerToggle">＋ Sticker</button>
+        <button class="tbtn" id="tSkDel" disabled title="Remove this sticker">✕</button>
+        <label class="skopt" title="Lock aspect ratio while resizing"><input type="checkbox" id="tSkUniform" checked /> Uniform</label>
+        <span class="layerctl">
+          <button class="tbtn" id="tLayerForward" disabled title="Bring selected layer forward">▲</button>
+          <button class="tbtn" id="tLayerBack" disabled title="Send selected layer back">▼</button>
+        </span>
+      </div>
+      <div class="sktray" id="tSkTray" style="display:none"></div>
+      <div class="toolrow barrow">
+        <span class="tip">Bars:</span>
+        <button class="tbtn" id="tBarTopBtn" title="Toggle a black bar at the top">▭ Top</button>
+        <button class="tbtn" id="tBarBottomBtn" title="Toggle a black bar at the bottom">▭ Bottom</button>
+        <button class="tbtn" id="tBarLeftBtn" title="Toggle a black bar on the left">▭ Left</button>
+        <button class="tbtn" id="tBarRightBtn" title="Toggle a black bar on the right">▭ Right</button>
+        <button class="tbtn" id="tBarEqualBtn" title="Make top/bottom equal and left/right equal">⇿ Equalize</button>
+        <span class="muted" id="textHint"></span>
         <span class="spacer"></span>
         <button class="btn ghost" id="textCancel">Cancel</button>
         <button class="btn primary" id="textSave">Save as new GIF</button>

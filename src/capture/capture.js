@@ -32,6 +32,27 @@ let selCap = null;
 let capDrag = null;
 let capSeq = 0;
 
+// sticker (image overlay) state: each = {id, src, fx, fy, wFrac, hFrac, natW, natH, el, img}
+// fx/fy = CENTER as a fraction of the OUTPUT region (same model as captions);
+// wFrac/hFrac = width/height as fractions of the region's width/height (independent
+// so stickers can be stretched, not just uniformly scaled).
+let stickers = [];
+let selSticker = null;
+let skDrag = null;     // {s, r} while dragging
+let skResize = null;   // {s, r, dir, box, aspect} while resizing
+let skSeq = 0;
+const SK_GRIPS = ['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'];
+
+// Unified paint order for ALL overlay items (captions + stickers), bottom→top.
+// DOM z-index and the ffmpeg bake order both follow this, so text and images
+// layer over each other however the user arranges them.
+let zorder = [];
+
+// black letterbox bars; top/bottom = fraction of region height, left/right =
+// fraction of region width. 0 = off.
+let bars = { top: 0, bottom: 0, left: 0, right: 0 };
+let barDrag = null;
+
 // ---- permission + sources ----
 async function init() {
   $('permBtn').addEventListener('click', () => window.gifApp.openScreenPrefs());
@@ -286,7 +307,7 @@ async function makeGif() {
   $('gifout').style.color = '';
   let res;
   try {
-    res = await window.gifApp.toGif({ src: lastSavedPath, fps, width, trim, crop, speed, outSeconds, captions: captionPayload() });
+    res = await window.gifApp.toGif({ src: lastSavedPath, fps, width, trim, crop, speed, outSeconds, layers: layerPayload(), bars });
   } catch (e) {
     res = { ok: false, error: e.message };
   }
@@ -321,6 +342,8 @@ function resetToPicker() {
   lastSavedBlob = null;
   lastSavedPath = null;
   clearCaptions();
+  clearStickers();
+  clearBars();
   $('preview').src = '';
   $('preview').srcObject = null;
   $('preview').style.display = '';
@@ -369,6 +392,8 @@ function initEditor() {
   const v = $('preview');
   videoW = v.videoWidth; videoH = v.videoHeight;
   clearCaptions();
+  clearStickers();
+  clearBars();
   // MediaRecorder WebM often reports duration=Infinity until forced to seek.
   resolveDuration(v, (dur) => {
     clipDuration = isFinite(dur) && dur > 0 ? dur : 0;
@@ -483,6 +508,8 @@ function toggleCrop() {
   if (cropOn) { setCropDefault(); if (cropRatio) fitBoxToAspect(); }
   updateEstimate();
   renderCaptions(); // region switched between full-frame and crop box
+  renderStickers();
+  renderBars();
 }
 
 function ratioVal(s) { const [a, b] = s.split(':').map(Number); return a / b; }
@@ -493,6 +520,8 @@ function applyAspect() {
   if (cropOn && cropRatio) fitBoxToAspect();
   updateEstimate();
   renderCaptions();
+  renderStickers();
+  renderBars();
 }
 
 // Reshape the current box to the locked ratio, kept centered and inside bounds.
@@ -606,6 +635,8 @@ function endDrag() {
   document.removeEventListener('mouseup', endDrag);
   updateEstimate(); // crop region changed → refresh estimate
   renderCaptions(); // keep captions aligned to the new crop region
+  renderStickers();
+  renderBars();
 }
 
 function cropRect() {
@@ -667,6 +698,7 @@ function renderCaptions() {
     c.el.style.fontSize = Math.max(8, Math.round(c.sizeFrac * r.H)) + 'px';
     c.el.style.color = c.color;
     c.el.textContent = c.text || ' ';
+    c.el.style.zIndex = zorder.indexOf(c) + 1;
     c.el.classList.toggle('sel', c === selCap);
   }
 }
@@ -676,9 +708,10 @@ function addCaption() {
   const el = document.createElement('div');
   el.className = 'txtcap';
   el.addEventListener('mousedown', (e) => startCapDrag(e, c));
-  $('capLayer').appendChild(el);
+  $('overlayLayer').appendChild(el);
   c.el = el;
   captions.push(c);
+  zorder.push(c); // newest on top
   selectCaption(c);
   $('capText').focus();
   $('capText').select();
@@ -690,7 +723,9 @@ function selectCaption(c) {
   for (const id of ['capText', 'capColor', 'capSmaller', 'capBigger', 'capDel']) $(id).disabled = !on;
   if (on) { $('capText').value = selCap.text; $('capColor').value = selCap.color; }
   else { $('capText').value = ''; }
+  if (selCap && selSticker) { selSticker = null; $('skDel').disabled = true; renderStickers(); } // one selection across layers
   renderCaptions();
+  updateLayerButtons();
 }
 
 function deleteCaption(c) {
@@ -698,11 +733,13 @@ function deleteCaption(c) {
   if (!c) return;
   if (c.el) c.el.remove();
   captions = captions.filter((x) => x !== c);
+  zorder = zorder.filter((x) => x !== c);
   selectCaption(captions[captions.length - 1] || null);
 }
 
 function clearCaptions() {
   for (const c of captions) if (c.el) c.el.remove();
+  zorder = zorder.filter((x) => !captions.includes(x));
   captions = [];
   selectCaption(null);
 }
@@ -731,14 +768,330 @@ function endCapDrag() {
   document.removeEventListener('mouseup', endCapDrag);
 }
 
-// Map captions → the payload ffmpeg drawtext needs: font size in OUTPUT pixels
-// (size fraction × output height) plus the center fractions + color.
-function captionPayload() {
-  if (!captions.length) return [];
+// Build the ordered overlay payload (bottom→top) ffmpeg bakes: text → drawtext
+// args, stickers → output-pixel width/height. Order follows `zorder`, so stacking
+// is preserved in the output exactly as shown in the editor.
+function layerPayload() {
   const out = outputDims();
-  return captions
-    .filter((c) => String(c.text || '').trim().length)
-    .map((c) => ({ text: c.text, fx: c.fx, fy: c.fy, size: Math.round(c.sizeFrac * out.h), color: c.color }));
+  const payload = [];
+  for (const item of zorder) {
+    if (captions.includes(item)) {
+      if (!String(item.text || '').trim().length) continue;
+      payload.push({ kind: 'text', text: item.text, fx: item.fx, fy: item.fy, size: Math.round(item.sizeFrac * out.h), color: item.color });
+    } else if (stickers.includes(item)) {
+      payload.push({ kind: 'sticker', path: item.src, fx: item.fx, fy: item.fy, w: Math.max(1, Math.round(item.wFrac * out.w)), h: Math.max(1, Math.round(item.hFrac * out.h)) });
+    }
+  }
+  return payload;
+}
+
+// ---- layer ordering (shared by captions + stickers) ----
+function selectedLayer() { return selCap || selSticker; }
+
+function reorderLayer(dir) {
+  const item = selectedLayer();
+  if (!item) return;
+  const i = zorder.indexOf(item);
+  const j = i + (dir > 0 ? 1 : -1);
+  if (i < 0 || j < 0 || j >= zorder.length) return;
+  zorder.splice(i, 1);
+  zorder.splice(j, 0, item);
+  renderCaptions();
+  renderStickers();
+  updateLayerButtons();
+}
+
+function updateLayerButtons() {
+  const item = selectedLayer();
+  const i = item ? zorder.indexOf(item) : -1;
+  $('layerForward').disabled = i < 0 || i >= zorder.length - 1;
+  $('layerBack').disabled = i <= 0;
+}
+
+// ---- image / sticker overlays ----
+// Position is a center fraction of the output region (crop box when cropping,
+// else the full frame); wFrac/hFrac are width/height fractions of the region so a
+// sticker can be stretched independently on each axis.
+function renderStickers() {
+  const r = outputRegion();
+  for (const s of stickers) {
+    if (!s.el) continue;
+    s.el.style.left = (r.L + s.fx * r.W) + 'px';
+    s.el.style.top = (r.T + s.fy * r.H) + 'px';
+    s.el.style.width = Math.max(8, s.wFrac * r.W) + 'px';
+    s.el.style.height = Math.max(8, s.hFrac * r.H) + 'px';
+    s.el.style.zIndex = zorder.indexOf(s) + 1;
+    s.el.classList.toggle('sel', s === selSticker);
+  }
+}
+
+function addSticker(src) {
+  const s = { id: ++skSeq, src, fx: 0.5, fy: 0.5, wFrac: 0.3, hFrac: 0.3, natW: 0, natH: 0 };
+  const el = document.createElement('div');
+  el.className = 'sticker';
+  const img = document.createElement('img');
+  img.draggable = false;
+  img.onload = () => {
+    s.natW = img.naturalWidth; s.natH = img.naturalHeight;
+    // Start at the image's natural aspect for the current region.
+    const r = outputRegion();
+    if (s.natW && r.H) s.hFrac = (s.wFrac * r.W) * (s.natH / s.natW) / r.H;
+    renderStickers();
+  };
+  img.src = window.gifApp.toFileUrl(src);
+  el.appendChild(img);
+  for (const dir of SK_GRIPS) {
+    const g = document.createElement('span');
+    g.className = 'skgrip ' + dir;
+    g.addEventListener('mousedown', (e) => startStickerResize(e, s, dir));
+    el.appendChild(g);
+  }
+  el.addEventListener('mousedown', (e) => startStickerDrag(e, s));
+  $('overlayLayer').appendChild(el);
+  s.el = el; s.img = img;
+  stickers.push(s);
+  zorder.push(s); // newest on top
+  selectSticker(s);
+}
+
+function selectSticker(s) {
+  selSticker = s || null;
+  $('skDel').disabled = !selSticker;
+  if (selSticker) selectCaption(null); // one selection at a time across layers
+  renderStickers();
+  updateLayerButtons();
+}
+
+function deleteSticker(s) {
+  s = s || selSticker;
+  if (!s) return;
+  if (s.el) s.el.remove();
+  stickers = stickers.filter((x) => x !== s);
+  zorder = zorder.filter((x) => x !== s);
+  selectSticker(null);
+}
+
+function clearStickers() {
+  for (const s of stickers) if (s.el) s.el.remove();
+  zorder = zorder.filter((x) => !stickers.includes(x));
+  stickers = [];
+  selectSticker(null);
+}
+
+function startStickerDrag(e, s) {
+  e.preventDefault();
+  e.stopPropagation();
+  selectSticker(s);
+  skDrag = { s, r: outputRegion() };
+  document.addEventListener('mousemove', onStickerDrag);
+  document.addEventListener('mouseup', endStickerDrag);
+}
+
+function onStickerDrag(e) {
+  if (!skDrag) return;
+  const vp = $('viewport').getBoundingClientRect();
+  const r = skDrag.r;
+  skDrag.s.fx = Math.max(0, Math.min(1, (e.clientX - vp.left - r.L) / r.W));
+  skDrag.s.fy = Math.max(0, Math.min(1, (e.clientY - vp.top - r.T) / r.H));
+  renderStickers();
+}
+
+function endStickerDrag() {
+  skDrag = null;
+  document.removeEventListener('mousemove', onStickerDrag);
+  document.removeEventListener('mouseup', endStickerDrag);
+}
+
+// 8-handle resize. Corners (nw/ne/sw/se) scale uniformly (aspect-locked) from the
+// opposite corner; edge midpoints (n/s/e/w) stretch a single axis with the
+// opposite edge anchored. Math is done in region pixels, then converted back to
+// the center + width/height fractions the sticker stores.
+function startStickerResize(e, s, dir) {
+  e.preventDefault();
+  e.stopPropagation();
+  selectSticker(s);
+  const r = outputRegion();
+  const cx = s.fx * r.W, cy = s.fy * r.H, hw = (s.wFrac * r.W) / 2, hh = (s.hFrac * r.H) / 2;
+  const wPx = s.wFrac * r.W;
+  skResize = {
+    s, r, dir,
+    box: { left: cx - hw, right: cx + hw, top: cy - hh, bottom: cy + hh },
+    aspect: wPx > 0 ? (s.hFrac * r.H) / wPx : 1, // height/width, for aspect-locked corners
+  };
+  document.addEventListener('mousemove', onStickerResize);
+  document.addEventListener('mouseup', endStickerResize);
+}
+
+// Pure geometry for an 8-handle resize, in region pixels. `uniform` locks aspect
+// (proportional scale) on every handle; otherwise corners stretch both axes and
+// edges stretch a single axis. `aspect` = height/width. Returns the new box.
+function resizeBox(box, dir, mx, my, aspect, uniform) {
+  let { left, right, top, bottom } = box;
+  const MIN = 12;
+  if (dir.length === 2) { // corner — anchor = opposite corner
+    const anchorX = dir.includes('w') ? right : left;
+    const anchorY = dir.includes('n') ? bottom : top;
+    let newW, newH;
+    if (uniform) { newW = Math.max(MIN, Math.abs(mx - anchorX), Math.abs(my - anchorY) / aspect); newH = newW * aspect; }
+    else { newW = Math.max(MIN, Math.abs(mx - anchorX)); newH = Math.max(MIN, Math.abs(my - anchorY)); }
+    if (dir.includes('e')) { left = anchorX; right = anchorX + newW; } else { right = anchorX; left = anchorX - newW; }
+    if (dir.includes('s')) { top = anchorY; bottom = anchorY + newH; } else { bottom = anchorY; top = anchorY - newH; }
+  } else if (uniform) { // edge, locked aspect → grow the other axis about the center
+    if (dir === 'e' || dir === 'w') {
+      const anchorX = dir === 'e' ? left : right;
+      const newW = Math.max(MIN, Math.abs(mx - anchorX)), newH = newW * aspect;
+      if (dir === 'e') { left = anchorX; right = anchorX + newW; } else { right = anchorX; left = anchorX - newW; }
+      const cy = (top + bottom) / 2; top = cy - newH / 2; bottom = cy + newH / 2;
+    } else {
+      const anchorY = dir === 's' ? top : bottom;
+      const newH = Math.max(MIN, Math.abs(my - anchorY)), newW = newH / aspect;
+      if (dir === 's') { top = anchorY; bottom = anchorY + newH; } else { bottom = anchorY; top = anchorY - newH; }
+      const cx = (left + right) / 2; left = cx - newW / 2; right = cx + newW / 2;
+    }
+  } else { // edge, free → stretch one axis, opposite edge anchored
+    if (dir === 'e') right = Math.max(left + MIN, mx);
+    else if (dir === 'w') left = Math.min(right - MIN, mx);
+    else if (dir === 's') bottom = Math.max(top + MIN, my);
+    else if (dir === 'n') top = Math.min(bottom - MIN, my);
+  }
+  return { left, right, top, bottom };
+}
+
+function onStickerResize(e) {
+  if (!skResize) return;
+  const { s, r, dir, aspect } = skResize;
+  const uniform = $('skUniform').checked; // lock aspect ratio (scale) vs free stretch
+  const vp = $('viewport').getBoundingClientRect();
+  const mx = e.clientX - vp.left - r.L; // region-relative pixels
+  const my = e.clientY - vp.top - r.T;
+  let { left, right, top, bottom } = skResize.box;
+  const b = resizeBox({ left, right, top, bottom }, dir, mx, my, aspect, uniform);
+  s.fx = ((b.left + b.right) / 2) / r.W;
+  s.fy = ((b.top + b.bottom) / 2) / r.H;
+  s.wFrac = (b.right - b.left) / r.W;
+  s.hFrac = (b.bottom - b.top) / r.H;
+  renderStickers();
+}
+
+function endStickerResize() {
+  skResize = null;
+  document.removeEventListener('mousemove', onStickerResize);
+  document.removeEventListener('mouseup', endStickerResize);
+}
+
+// ---- black letterbox bars (top / bottom / left / right) ----
+function renderBars() {
+  const r = outputRegion();
+  // Pixel-snap so a bar's far edge reaches the media edge exactly (floor the near
+  // edge, ceil the far edge). Any ≤1px overlap is clipped by overflow:hidden, so
+  // no sliver of the GIF peeks past the bar from sub-pixel rounding.
+  const L = Math.floor(r.L), T = Math.floor(r.T);
+  const R = Math.ceil(r.L + r.W), B = Math.ceil(r.T + r.H);
+  const place = (el, on, x, y, w, h) => {
+    if (!on) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.width = w + 'px'; el.style.height = h + 'px';
+  };
+  place($('barTop'), bars.top > 0, L, T, R - L, Math.ceil(r.T + bars.top * r.H) - T);
+  const bTop = Math.floor(r.T + r.H - bars.bottom * r.H);
+  place($('barBottom'), bars.bottom > 0, L, bTop, R - L, B - bTop);
+  place($('barLeft'), bars.left > 0, L, T, Math.ceil(r.L + bars.left * r.W) - L, B - T);
+  const rLeft = Math.floor(r.L + r.W - bars.right * r.W);
+  place($('barRight'), bars.right > 0, rLeft, T, R - rLeft, B - T);
+}
+
+function updateBarButtons() {
+  $('barTopBtn').classList.toggle('on', bars.top > 0);
+  $('barBottomBtn').classList.toggle('on', bars.bottom > 0);
+  $('barLeftBtn').classList.toggle('on', bars.left > 0);
+  $('barRightBtn').classList.toggle('on', bars.right > 0);
+}
+
+function toggleBar(which) {
+  bars[which] = bars[which] > 0 ? 0 : 0.15; // default thickness when turning on
+  renderBars();
+  updateBarButtons();
+}
+
+// Make each active opposite pair equal (to the thicker of the two).
+function equalizeBars() {
+  if (bars.top > 0 && bars.bottom > 0) { const m = Math.max(bars.top, bars.bottom); bars.top = bars.bottom = m; }
+  if (bars.left > 0 && bars.right > 0) { const m = Math.max(bars.left, bars.right); bars.left = bars.right = m; }
+  renderBars();
+}
+
+function clearBars() { bars = { top: 0, bottom: 0, left: 0, right: 0 }; renderBars(); updateBarButtons(); }
+
+function startBarDrag(e, which) {
+  e.preventDefault();
+  e.stopPropagation();
+  barDrag = { which, r: outputRegion() };
+  document.addEventListener('mousemove', onBarDrag);
+  document.addEventListener('mouseup', endBarDrag);
+}
+
+function onBarDrag(e) {
+  if (!barDrag) return;
+  const vp = $('viewport').getBoundingClientRect();
+  const r = barDrag.r;
+  const which = barDrag.which;
+  let frac;
+  if (which === 'top' || which === 'bottom') {
+    const y = e.clientY - vp.top - r.T; // region px from top
+    frac = which === 'top' ? y / r.H : (r.H - y) / r.H;
+  } else {
+    const x = e.clientX - vp.left - r.L; // region px from left
+    frac = which === 'left' ? x / r.W : (r.W - x) / r.W;
+  }
+  bars[which] = Math.max(0.03, Math.min(0.6, frac));
+  renderBars();
+}
+
+function endBarDrag() {
+  barDrag = null;
+  document.removeEventListener('mousemove', onBarDrag);
+  document.removeEventListener('mouseup', endBarDrag);
+}
+
+// ---- sticker recents tray ----
+async function refreshStickerTray() {
+  const items = await window.gifApp.stickersList();
+  const tray = $('skTray');
+  tray.innerHTML = '';
+  if (!items.length) {
+    const empty = document.createElement('span');
+    empty.className = 'skempty';
+    empty.textContent = 'No saved stickers yet —';
+    tray.appendChild(empty);
+  }
+  for (const it of items) {
+    const thumb = document.createElement('div');
+    thumb.className = 'skthumb';
+    thumb.title = it.name || 'sticker';
+    const img = document.createElement('img');
+    img.src = window.gifApp.toFileUrl(it.path);
+    thumb.appendChild(img);
+    const rm = document.createElement('button');
+    rm.className = 'skrm';
+    rm.textContent = '×';
+    rm.title = 'Remove from recents';
+    rm.addEventListener('click', async (e) => { e.stopPropagation(); await window.gifApp.stickersRemove(it.id); refreshStickerTray(); });
+    thumb.appendChild(rm);
+    thumb.addEventListener('click', () => addSticker(it.path));
+    tray.appendChild(thumb);
+  }
+  const up = document.createElement('button');
+  up.className = 'skupload';
+  up.textContent = '＋';
+  up.title = 'Upload an image';
+  up.addEventListener('click', uploadSticker);
+  tray.appendChild(up);
+}
+
+async function uploadSticker() {
+  const res = await window.gifApp.stickersImport();
+  await refreshStickerTray();
+  if (res && res.ok && res.item) addSticker(res.item.path); // drop the just-uploaded one onto the video
 }
 
 function updateEstimate() {
@@ -847,7 +1200,7 @@ $('miReveal').addEventListener('click', () => { $('copyMenu').classList.remove('
 $('trimStart').addEventListener('input', () => onTrimInput('start'));
 $('trimEnd').addEventListener('input', () => onTrimInput('end'));
 $('cropToggle').addEventListener('click', toggleCrop);
-$('cropReset').addEventListener('click', () => { setCropDefault(); if (cropRatio) fitBoxToAspect(); updateEstimate(); renderCaptions(); });
+$('cropReset').addEventListener('click', () => { setCropDefault(); if (cropRatio) fitBoxToAspect(); updateEstimate(); renderCaptions(); renderStickers(); renderBars(); });
 $('cropAspect').addEventListener('change', applyAspect);
 
 // text captions
@@ -857,7 +1210,27 @@ $('capColor').addEventListener('input', () => { if (selCap) { selCap.color = $('
 $('capSmaller').addEventListener('click', () => { if (selCap) { selCap.sizeFrac = Math.max(0.04, selCap.sizeFrac - 0.02); renderCaptions(); } });
 $('capBigger').addEventListener('click', () => { if (selCap) { selCap.sizeFrac = Math.min(0.6, selCap.sizeFrac + 0.02); renderCaptions(); } });
 $('capDel').addEventListener('click', () => deleteCaption());
-window.addEventListener('resize', renderCaptions);
+// stickers
+$('stickerToggle').addEventListener('click', () => {
+  const tray = $('skTray');
+  const show = tray.style.display === 'none';
+  tray.style.display = show ? '' : 'none';
+  if (show) refreshStickerTray();
+});
+$('skDel').addEventListener('click', () => deleteSticker());
+$('layerForward').addEventListener('click', () => reorderLayer(1));
+$('layerBack').addEventListener('click', () => reorderLayer(-1));
+// black bars
+$('barTopBtn').addEventListener('click', () => toggleBar('top'));
+$('barBottomBtn').addEventListener('click', () => toggleBar('bottom'));
+$('barLeftBtn').addEventListener('click', () => toggleBar('left'));
+$('barRightBtn').addEventListener('click', () => toggleBar('right'));
+$('barEqualBtn').addEventListener('click', equalizeBars);
+$('barTop').querySelector('.baredge').addEventListener('mousedown', (e) => startBarDrag(e, 'top'));
+$('barBottom').querySelector('.baredge').addEventListener('mousedown', (e) => startBarDrag(e, 'bottom'));
+$('barLeft').querySelector('.baredge').addEventListener('mousedown', (e) => startBarDrag(e, 'left'));
+$('barRight').querySelector('.baredge').addEventListener('mousedown', (e) => startBarDrag(e, 'right'));
+window.addEventListener('resize', () => { renderCaptions(); renderStickers(); renderBars(); });
 $('gifSize').addEventListener('change', updateEstimate);
 $('gifFps').addEventListener('change', updateEstimate);
 $('gifSpeed').addEventListener('change', () => { applySpeed(); updateEstimate(); });

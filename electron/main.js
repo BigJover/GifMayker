@@ -17,6 +17,7 @@ const captionFontPath = path.join(__dirname, '..', 'src', 'fonts', 'Anton-Regula
   .replace('app.asar', 'app.asar.unpacked');
 const settings = require('./settings');
 const library = require('./library');
+const stickers = require('./stickers');
 
 const SMOKE = !!process.env.SMOKE_TEST; // headless boot test: wire everything then quit
 let tray = null;
@@ -73,8 +74,8 @@ function createCaptureWindow() {
     return;
   }
   captureWin = new BrowserWindow({
-    width: 760,
-    height: 620,
+    width: 980,   // sized so the ~880px preview + option rows fill the window
+    height: 880,
     minWidth: 620,
     minHeight: 520,
     show: false,
@@ -98,8 +99,8 @@ function createSoundboardWindow() {
     return;
   }
   soundboardWin = new BrowserWindow({
-    width: 720,
-    height: 600,
+    width: 940,   // roomy GIF grid + edit modal without lots of empty background
+    height: 860,
     minWidth: 560,
     minHeight: 460,
     show: false,
@@ -429,6 +430,60 @@ ipcMain.handle('sb/remove', (_e, id) => {
   return sbList();
 });
 
+// --- Sticker recents: user-uploaded images, copied in so they persist + reuse ---
+ipcMain.handle('stickers/list', () => stickers.load().items);
+
+ipcMain.handle('stickers/import', async (_e) => {
+  const win = BrowserWindow.fromWebContents(_e.sender);
+  const res = await dialog.showOpenDialog(win, {
+    title: 'Choose sticker image(s)',
+    defaultPath: app.getPath('downloads') + path.sep,
+    properties: ['openFile', 'multiSelections'],
+    // Static images only; PNG keeps transparency for clean overlays.
+    filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+  });
+  if (res.canceled || !res.filePaths.length) return { ok: false, items: stickers.load().items };
+  const store = stickers.load();
+  let last = null;
+  for (const src of res.filePaths) {
+    const existing = store.items.find((it) => it.src === src);
+    if (existing) {
+      // Re-uploading a known file just bumps it to the front of recents.
+      store.items = store.items.filter((it) => it !== existing);
+      store.items.unshift(existing);
+      last = existing;
+      continue;
+    }
+    try {
+      const ext = path.extname(src).toLowerCase() || '.png';
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      const dest = path.join(stickers.dir(), `${id}${ext}`);
+      fs.copyFileSync(src, dest);
+      const item = { id, path: dest, name: path.basename(src), src, addedAt: Date.now() };
+      store.items.unshift(item);
+      last = item;
+    } catch (e) { console.error('sticker import failed:', e); }
+  }
+  // Cap recents; delete the copied files of anything that falls off the list.
+  if (store.items.length > stickers.MAX_RECENTS) {
+    for (const drop of store.items.slice(stickers.MAX_RECENTS)) {
+      try { fs.rmSync(drop.path, { force: true }); } catch { /* ignore */ }
+    }
+    store.items = store.items.slice(0, stickers.MAX_RECENTS);
+  }
+  stickers.save(store);
+  return { ok: true, item: last, items: store.items };
+});
+
+ipcMain.handle('stickers/remove', (_e, id) => {
+  const store = stickers.load();
+  const it = store.items.find((x) => x.id === id);
+  if (it) { try { fs.rmSync(it.path, { force: true }); } catch { /* ignore */ } }
+  store.items = store.items.filter((x) => x.id !== id);
+  stickers.save(store);
+  return store.items;
+});
+
 // Delete a GIF from the captures folder (to Trash) and unpin it if on the board.
 ipcMain.handle('captures/delete-gif', async (_e, file) => {
   try {
@@ -661,18 +716,70 @@ ipcMain.handle('savedir/choose', async () => {
 // Two-stage palette encode in a single ffmpeg pass: palettegen builds an
 // optimal 256-color table from the clip, paletteuse maps frames to it with
 // dithering. This is what makes the GIF look clean instead of banded.
-function gifFilter(fps, width, crop, speed, drawtexts) {
-  // crop (source pixels) → speed (retime) → fps drop → scale → TEXT → palette.
-  // Text overlays go AFTER scale so they render at output resolution (crisp) and
-  // BEFORE the palette split so palettegen accounts for the text colors.
-  const cropF = crop ? `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y},` : '';
+// The geometric/timing per-frame chain (no overlays, no palette, no trailing
+// comma): crop (source pixels) → speed (retime) → fps drop → scale. Overlays
+// (text + stickers) are applied AFTER this so they render at output resolution.
+function frameChain(fps, width, crop, speed) {
+  const parts = [];
+  if (crop) parts.push(`crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}`);
   // setpts=PTS/speed: >1 speeds up, <1 slows down (e.g. 0.25 = 4× longer).
-  const speedF = (speed && speed !== 1) ? `setpts=PTS/${speed},` : '';
-  const scale = width ? `scale=${width}:-1:flags=lanczos,` : '';
-  const textF = drawtexts && drawtexts.length ? drawtexts.join(',') + ',' : '';
-  return `${cropF}${speedF}fps=${fps},${scale}${textF}split[s0][s1]` +
-    `;[s0]palettegen=stats_mode=diff[p]` +
+  if (speed && speed !== 1) parts.push(`setpts=PTS/${speed}`);
+  parts.push(`fps=${fps}`);
+  if (width) parts.push(`scale=${width}:-1:flags=lanczos`);
+  return parts.join(',');
+}
+
+// Black letterbox bars drawn ON the scaled frame (top/bottom), so text/stickers
+// placed on them read clearly. Heights are fractions of the frame height, applied
+// via ffmpeg's `ih` so we don't need pixel math here. Returns 0–2 drawbox filters,
+// applied BEFORE overlays (bars are a background) and AFTER scale.
+function barFilters(bars) {
+  const out = [];
+  const top = Number(bars && bars.top) || 0;
+  const bot = Number(bars && bars.bottom) || 0;
+  const left = Number(bars && bars.left) || 0;
+  const right = Number(bars && bars.right) || 0;
+  if (top > 0) out.push(`drawbox=x=0:y=0:w=iw:h=ih*${top.toFixed(4)}:color=black:t=fill`);
+  if (bot > 0) out.push(`drawbox=x=0:y=ih*${(1 - bot).toFixed(4)}:w=iw:h=ih*${bot.toFixed(4)}:color=black:t=fill`);
+  if (left > 0) out.push(`drawbox=x=0:y=0:w=iw*${left.toFixed(4)}:h=ih:color=black:t=fill`);
+  if (right > 0) out.push(`drawbox=x=iw*${(1 - right).toFixed(4)}:y=0:w=iw*${right.toFixed(4)}:h=ih:color=black:t=fill`);
+  return out;
+}
+
+// Join filter pieces with commas, skipping empty ones (avoids stray `,,`).
+function joinF(...pieces) { return pieces.filter((p) => p && p.length).join(','); }
+
+// The 256-color palette split that makes a clean (un-banded) GIF. `inLabel` is
+// the filter_complex pad feeding it (e.g. 'L2'); pass '' for an inline -vf chain.
+function paletteSplit(inLabel) {
+  const head = inLabel ? `[${inLabel}]split[s0][s1]` : `split[s0][s1]`;
+  return `${head};[s0]palettegen=stats_mode=diff[p]` +
     `;[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
+}
+
+// Apply overlay nodes (text + stickers) IN ORDER onto the running frame, so they
+// stack exactly as arranged in the editor. Text → drawtext (single input);
+// sticker → an extra ffmpeg input (inputOffset, inputOffset+1, …) scaled to
+// w×h and centered on (fx,fy). CROSS-PLATFORM RULE (same as captions): sticker
+// files are referenced via bare `-i name.png` with ffmpeg's cwd = the temp dir,
+// never an absolute path — a Windows drive colon would break the filtergraph.
+function buildLayerGraph(startLabel, nodes, inputOffset) {
+  const segs = [];
+  let cur = startLabel;
+  let inIdx = inputOffset;
+  nodes.forEach((n, i) => {
+    if (n.kind === 'text') {
+      segs.push(`[${cur}]${n.drawtext}[L${i}]`);
+    } else {
+      const fx = (Number(n.fx) || 0).toFixed(4);
+      const fy = (Number(n.fy) || 0).toFixed(4);
+      segs.push(`[${inIdx}:v]scale=${n.w}:${n.h}[sk${i}]`);
+      segs.push(`[${cur}][sk${i}]overlay=x=(main_w*${fx})-(overlay_w/2):y=(main_h*${fy})-(overlay_h/2)[L${i}]`);
+      inIdx++;
+    }
+    cur = `L${i}`;
+  });
+  return { segs, last: cur };
 }
 
 // "#rrggbb" → ffmpeg "0xrrggbb"; anything unparseable falls back to white.
@@ -698,33 +805,49 @@ function buildDrawtext(cap) {
     `:x=(w*${fx})-(text_w/2):y=(h*${fy})-(text_h/2)`;
 }
 
-ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null, crop = null, speed = 1, outSeconds = 0, captions = [] }) => {
+// Prepare the temp dir + ordered overlay nodes for a layer list (text + stickers
+// in paint order). Returns { capDir, nodes, stickerArgs, hasStickers } or null
+// when there are no overlays. capDir holds font.ttf, c*.txt and the copied sticker
+// images; ffmpeg MUST run with cwd=capDir so every filter/-i ref is a bare
+// filename — a Windows absolute path's drive colon breaks the filtergraph.
+function prepOverlays(layers) {
+  const ls = Array.isArray(layers) ? layers.filter((l) => l && (
+    l.kind === 'text' ? String(l.text || '').length
+      : l.kind === 'sticker' && l.path && fs.existsSync(l.path))) : [];
+  if (!ls.length) return null;
+  const capDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-ov-'));
+  const nodes = [];
+  const stickerArgs = []; // ffmpeg -i flags for the sticker images, in node order
+  let txtN = 0, skN = 0, needFont = false;
+  for (const l of ls) {
+    if (l.kind === 'text') {
+      const name = `c${txtN++}.txt`;
+      fs.writeFileSync(path.join(capDir, name), String(l.text), 'utf8');
+      nodes.push({ kind: 'text', drawtext: buildDrawtext({ textfile: name, fx: l.fx, fy: l.fy, size: l.size, color: l.color }) });
+      needFont = true;
+    } else {
+      const ext = (path.extname(l.path) || '.png').toLowerCase();
+      const name = `s${skN++}${ext}`;
+      fs.copyFileSync(l.path, path.join(capDir, name));
+      stickerArgs.push('-i', name);
+      nodes.push({ kind: 'sticker', w: Math.max(1, Math.round(Number(l.w) || 1)), h: Math.max(1, Math.round(Number(l.h) || 1)), fx: l.fx, fy: l.fy });
+    }
+  }
+  if (needFont) fs.copyFileSync(captionFontPath, path.join(capDir, 'font.ttf'));
+  return { capDir, nodes, stickerArgs, hasStickers: stickerArgs.length > 0 };
+}
+
+ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null, crop = null, speed = 1, outSeconds = 0, layers = [], bars = null }) => {
   return new Promise((resolve) => {
     if (!src || !fs.existsSync(src)) { resolve({ ok: false, error: 'source file not found' }); return; }
     const out = src.replace(/\.webm$/i, '') + '.gif';
     const w = Number(width);
 
-    // Text overlays: write each caption's text to a temp file (drawtext textfile=)
-    // and build its filter. tmpPaths are cleaned up once ffmpeg finishes.
-    const tmpPaths = [];
-    let drawtexts = [];
-    let capDir = null; // temp dir with font.ttf + c*.txt; ffmpeg runs with cwd here so the filter uses bare names
-    try {
-      const caps = Array.isArray(captions) ? captions.filter((c) => c && String(c.text || '').length) : [];
-      if (caps.length) {
-        capDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-cap-'));
-        tmpPaths.push(capDir);
-        fs.copyFileSync(captionFontPath, path.join(capDir, 'font.ttf'));
-        drawtexts = caps.map((c, i) => {
-          const name = `c${i}.txt`;
-          fs.writeFileSync(path.join(capDir, name), String(c.text), 'utf8');
-          return buildDrawtext({ textfile: name, fx: c.fx, fy: c.fy, size: c.size, color: c.color });
-        });
-      }
-    } catch { drawtexts = []; capDir = null; } // captions are best-effort; never block the GIF
-    const cleanupTmp = () => {
-      for (const p of tmpPaths) { try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ } }
-    };
+    // Overlays (text + stickers) live in a temp dir; ffmpeg runs with cwd there.
+    let ov = null;
+    try { ov = prepOverlays(layers); } catch { ov = null; } // best-effort; never block the GIF
+    const capDir = ov ? ov.capDir : null;
+    const cleanupTmp = () => { if (capDir) { try { fs.rmSync(capDir, { recursive: true, force: true }); } catch { /* ignore */ } } };
 
     // Trim with INPUT seeking: -ss before -i fast-seeks to the nearest keyframe
     // (no decode-and-discard from frame 0), then decodes to the exact frame, and
@@ -737,7 +860,24 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
       preInput.push('-ss', String(trim.start || 0));
       postInput.push('-t', String(trim.duration));
     }
-    const args = ['-y', ...preInput, '-i', src, ...postInput, '-vf', gifFilter(Number(fps), w, crop, Number(speed), drawtexts), '-loop', '0', out];
+
+    // Stickers need extra -i inputs + a filter_complex (overlay is a 2-input
+    // filter), and text must interleave with them by layer order. Their -i flags
+    // go right after the source so postInput's -t stays an OUTPUT option. With no
+    // stickers, keep the faster single-input -vf path (text via drawtext chain).
+    const geo = frameChain(Number(fps), w, crop, Number(speed));
+    const baseChain = joinF(geo, barFilters(bars).join(',')); // geo + black bars (background)
+    let filterArgs;
+    let stickerArgs = [];
+    if (ov && ov.hasStickers) {
+      stickerArgs = ov.stickerArgs;
+      const { segs, last } = buildLayerGraph('base', ov.nodes, 1); // input 0 = src, 1.. = stickers
+      filterArgs = ['-filter_complex', `[0:v]${baseChain}[base];${segs.join(';')};${paletteSplit(last)}`];
+    } else {
+      const drawtexts = ov ? ov.nodes.filter((n) => n.kind === 'text').map((n) => n.drawtext) : [];
+      filterArgs = ['-vf', joinF(baseChain, drawtexts.join(','), paletteSplit(''))];
+    }
+    const args = ['-y', ...preInput, '-i', src, ...stickerArgs, ...postInput, ...filterArgs, '-loop', '0', out];
 
     let proc;
     try {
@@ -772,35 +912,38 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
   });
 });
 
-// Bake text captions into an EXISTING gif → a NEW gif added to the GifBoard.
-// Reuses the same drawtext machinery as capture/to-gif, but with no crop/scale/
-// fps so the original dimensions + frame timing are preserved.
-ipcMain.handle('gif/add-text', (_e, { src, captions = [] }) => {
+// Bake text + stickers into an EXISTING gif → a NEW gif added to the GifBoard.
+// Reuses the same overlay machinery as capture/to-gif, but with no crop/scale/fps
+// so the original dimensions + frame timing are preserved.
+ipcMain.handle('gif/add-text', (_e, { src, layers = [], bars = null }) => {
   return new Promise((resolve) => {
     if (!src || !fs.existsSync(src)) { resolve({ ok: false, error: 'source gif not found' }); return; }
-    const caps = Array.isArray(captions) ? captions.filter((c) => c && String(c.text || '').length) : [];
-    if (!caps.length) { resolve({ ok: false, error: 'no text added' }); return; }
 
-    const out = path.join(path.dirname(src), `${path.basename(src).replace(/\.gif$/i, '')}-text-${Date.now()}.gif`);
-    const tmpPaths = [];
-    let drawtexts, capDir;
-    try {
-      capDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-cap-'));
-      tmpPaths.push(capDir);
-      fs.copyFileSync(captionFontPath, path.join(capDir, 'font.ttf'));
-      drawtexts = caps.map((c, i) => {
-        const name = `c${i}.txt`;
-        fs.writeFileSync(path.join(capDir, name), String(c.text), 'utf8');
-        return buildDrawtext({ textfile: name, fx: c.fx, fy: c.fy, size: c.size, color: c.color });
-      });
-    } catch (e) { resolve({ ok: false, error: 'caption setup failed: ' + e.message }); return; }
-    const cleanupTmp = () => { for (const p of tmpPaths) { try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignore */ } } };
+    let ov;
+    try { ov = prepOverlays(layers); } catch (e) { resolve({ ok: false, error: 'overlay setup failed: ' + e.message }); return; }
+    const bf = barFilters(bars);
+    if (!ov && !bf.length) { resolve({ ok: false, error: 'nothing to add' }); return; }
+    const capDir = ov ? ov.capDir : null;
+    const nodes = ov ? ov.nodes : [];
+    const stickerArgs = ov ? ov.stickerArgs : [];
+    const hasStickers = ov ? ov.hasStickers : false;
+    const cleanupTmp = () => { if (capDir) { try { fs.rmSync(capDir, { recursive: true, force: true }); } catch { /* ignore */ } } };
 
-    const filter = `${drawtexts.join(',')},split[a][b]` +
-      `;[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle`;
+    const out = path.join(path.dirname(src), `${path.basename(src).replace(/\.gif$/i, '')}-edit-${Date.now()}.gif`);
+
+    // No crop/scale/fps here — bars (background) then overlays chain off the source.
+    let filterArgs;
+    if (hasStickers) {
+      const baseSeg = bf.length ? `[0:v]${bf.join(',')}[base];` : '';
+      const { segs, last } = buildLayerGraph(bf.length ? 'base' : '0:v', nodes, 1);
+      filterArgs = ['-filter_complex', `${baseSeg}${segs.join(';')};${paletteSplit(last)}`];
+    } else {
+      const drawtexts = nodes.filter((n) => n.kind === 'text').map((n) => n.drawtext);
+      filterArgs = ['-vf', joinF(bf.join(','), drawtexts.join(','), paletteSplit(''))];
+    }
     let proc;
     try {
-      proc = spawn(ffmpegPath, ['-y', '-i', src, '-vf', filter, '-loop', '0', out], { cwd: capDir });
+      proc = spawn(ffmpegPath, ['-y', '-i', src, ...stickerArgs, ...filterArgs, '-loop', '0', out], capDir ? { cwd: capDir } : undefined);
     } catch (e) { cleanupTmp(); resolve({ ok: false, error: e.message }); return; }
     let err = '';
     proc.stderr.on('data', (d) => { err += d.toString(); });

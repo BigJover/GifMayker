@@ -97,3 +97,63 @@ footer .spacer { margin-left: auto; }
   font-family: 'Anton', Impact, sans-serif; line-height: 1; white-space: pre; text-align: center;
   color: #fff; user-select: none; padding: 1px 3px; }
 .txtcap.sel { outline: 1px dashed var(--accent); outline-offset: 4px; }
+
+/* draggable image/sticker overlays — shared by the capture editor and the
+   GifBoard edit modal. Text (.txtcap) and stickers (.sticker) live in the SAME
+   overlay container (.overlaylayer) so per-element z-index interleaves them. */
+.overlaylayer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 5; }
+
+/* black letterbox bars (background for readable text) — sit above the media but
+   below the text/sticker overlay layer. Drag a bar's inner edge to resize. */
+.barslayer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
+.bar { position: absolute; background: #000; display: none; }
+/* horizontal bars (top/bottom): inner edge is a horizontal drag handle */
+.bar.top .baredge, .bar.bottom .baredge { position: absolute; left: 0; right: 0; height: 9px; pointer-events: auto; cursor: ns-resize; }
+.bar.top .baredge { bottom: -4px; }
+.bar.bottom .baredge { top: -4px; }
+/* vertical bars (left/right): inner edge is a vertical drag handle */
+.bar.left .baredge, .bar.right .baredge { position: absolute; top: 0; bottom: 0; width: 9px; pointer-events: auto; cursor: ew-resize; }
+.bar.left .baredge { right: -4px; }
+.bar.right .baredge { left: -4px; }
+.bar .baredge::after { content: ''; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  border-radius: 2px; background: var(--accent); opacity: 0; transition: opacity .12s; }
+.bar.top .baredge::after, .bar.bottom .baredge::after { width: 28px; height: 3px; }
+.bar.left .baredge::after, .bar.right .baredge::after { width: 3px; height: 28px; }
+.bar .baredge:hover::after { opacity: .9; }
+.sticker { position: absolute; transform: translate(-50%, -50%); pointer-events: auto;
+  cursor: move; user-select: none; line-height: 0; box-sizing: border-box; }
+.sticker img { display: block; width: 100%; height: 100%; -webkit-user-drag: none; pointer-events: none; }
+.sticker.sel { outline: 1px dashed var(--accent); outline-offset: 3px; }
+/* 8 resize handles: corners scale uniformly (aspect-locked), edge midpoints
+   stretch one axis. Shown only on the selected sticker. */
+.sticker .skgrip { position: absolute; width: 12px; height: 12px; background: var(--accent);
+  border: 1px solid var(--bg); border-radius: 2px; display: none; pointer-events: auto; }
+.sticker.sel .skgrip { display: block; }
+.sticker .skgrip.nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.sticker .skgrip.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.sticker .skgrip.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.sticker .skgrip.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.sticker .skgrip.n { left: 50%; top: -6px; transform: translateX(-50%); cursor: ns-resize; }
+.sticker .skgrip.s { left: 50%; bottom: -6px; transform: translateX(-50%); cursor: ns-resize; }
+.sticker .skgrip.e { right: -6px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.sticker .skgrip.w { left: -6px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+
+/* recents tray: thumbnails of saved stickers + an upload tile. Shared by the
+   capture editor and the GifBoard edit modal. */
+.sktray { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px;
+  background: var(--input); border: 1px solid var(--border); border-radius: 6px; }
+.sktray .skthumb { position: relative; width: 44px; height: 44px; border-radius: 5px;
+  background: var(--thumb-bg); border: 1px solid var(--border); cursor: pointer; overflow: hidden; }
+.sktray .skthumb img { width: 100%; height: 100%; object-fit: contain; }
+.sktray .skthumb:hover { border-color: var(--border-hover); }
+.sktray .skthumb .skrm { position: absolute; top: -1px; right: -1px; width: 15px; height: 15px;
+  line-height: 14px; text-align: center; font-size: 11px; background: var(--danger); color: #fff;
+  border: none; border-radius: 0 5px 0 5px; cursor: pointer; display: none; }
+.sktray .skthumb:hover .skrm { display: block; }
+.sktray .skupload { width: 44px; height: 44px; border-radius: 5px; border: 1px dashed var(--border-strong);
+  background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; }
+.sktray .skupload:hover { color: var(--text); border-color: var(--accent); }
+.sktray .skempty { font-size: 11px; color: var(--muted); padding: 0 4px; }
+/* "Uniform" resize toggle next to the sticker controls */
+.skopt { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 3px; cursor: pointer; user-select: none; }
+.skopt input { margin: 0; cursor: pointer; }

@@ -31,8 +31,13 @@ contextBridge.exposeInMainWorld('gifApp', {
   sbList: () => ipcRenderer.invoke('sb/list'),
   sbImport: (opts) => ipcRenderer.invoke('sb/import', opts),
   sbAdd: (file) => ipcRenderer.invoke('sb/add', file),
-  addTextToGif: (src, captions) => ipcRenderer.invoke('gif/add-text', { src, captions }),
+  addTextToGif: (src, layers, bars) => ipcRenderer.invoke('gif/add-text', { src, layers, bars }),
   sbRemove: (id) => ipcRenderer.invoke('sb/remove', id),
+
+  // Sticker recents (user-uploaded overlay images, reusable across GIFs)
+  stickersList: () => ipcRenderer.invoke('stickers/list'),
+  stickersImport: () => ipcRenderer.invoke('stickers/import'),
+  stickersRemove: (id) => ipcRenderer.invoke('stickers/remove', id),
   listCaptureGifs: () => ipcRenderer.invoke('captures/list-gifs'),
   deleteCaptureGif: (file) => ipcRenderer.invoke('captures/delete-gif', file),
   deleteSource: (file) => ipcRenderer.invoke('capture/delete-source', file),
