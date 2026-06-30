@@ -45,9 +45,16 @@
     .tile .rm:hover { background: var(--danger); }
     .tile .cap { padding: 5px 9px 7px; font-size: 11.5px; display: flex; flex-direction: column; gap: 3px; }
     .tile .cap .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .capactions { display: flex; align-items: center; gap: 8px; }
     .capedit { align-self: flex-start; font-size: 10.5px; background: transparent; border: none;
       color: var(--muted); cursor: pointer; padding: 0; display: flex; align-items: center; gap: 3px; }
     .capedit:hover { color: var(--accent); }
+    /* per-GIF quick-key chip */
+    .keybind { font-size: 10px; line-height: 1; background: var(--input); border: 1px solid var(--border-strong);
+      color: var(--muted-3); cursor: pointer; padding: 3px 6px; border-radius: 6px; white-space: nowrap; }
+    .keybind:hover { border-color: var(--border-hover); color: var(--text); }
+    .keybind.bound { color: var(--accent-soft); background: #2c2110; border-color: var(--border-active); font-weight: 600; }
+    .keybind.listening { color: var(--accent); border-color: var(--accent); }
     .tile.missing { opacity: .55; }
     .tile.missing .cap { color: #d56a4a; }
     /* hover "copy" veil */

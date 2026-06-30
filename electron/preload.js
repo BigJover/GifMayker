@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld('gifApp', {
   addTextToGif: (src, layers, bars) => ipcRenderer.invoke('gif/add-text', { src, layers, bars }),
   sbRemove: (id) => ipcRenderer.invoke('sb/remove', id),
 
+  // GifBoard quick-keys: bind a global hotkey to a board GIF (accelerator=null clears).
+  sbSetHotkey: (id, accelerator) => ipcRenderer.invoke('sb/set-hotkey', { id, accelerator }),
+  // Main → board window: a quick-key fired and copied a GIF (so the tile can flash).
+  onSbCopied: (cb) => ipcRenderer.on('sb/copied', (_e, payload) => cb(payload)),
+
   // Sticker recents (user-uploaded overlay images, reusable across GIFs)
   stickersList: () => ipcRenderer.invoke('stickers/list'),
   stickersImport: () => ipcRenderer.invoke('stickers/import'),
@@ -71,6 +76,10 @@ contextBridge.exposeInMainWorld('gifApp', {
     }
   },
   replayError: (msg) => ipcRenderer.invoke('replay/error', msg),
+  replayArmed: (ok) => ipcRenderer.invoke('replay/armed', ok),
+  // Free the camera from webcam Instant Replay before a webcam capture grabs it.
+  suspendReplayForCapture: () => ipcRenderer.invoke('replay/suspend-for-capture'),
+  reacquireReplay: () => ipcRenderer.invoke('replay/reacquire'),
   toGif: (opts) => ipcRenderer.invoke('capture/to-gif', opts),
   onGifProgress: (cb) => ipcRenderer.on('gif/progress', (_e, pct) => cb(pct)),
 

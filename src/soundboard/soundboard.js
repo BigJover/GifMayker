@@ -26,12 +26,20 @@ function render() {
       : `<span class="thumb"><img src="${fileURL(g.path)}" alt="" draggable="false" />` +
         `<span class="badge">GIF</span><span class="veil">Copy</span></span>`;
     const editBtn = g.missing ? '' : `<button class="capedit" title="Add text to this GIF">✎ edit</button>`;
+    const keyBtn = g.missing ? '' :
+      `<button class="keybind${g.hotkey ? ' bound' : ''}" title="${g.hotkey
+        ? 'Hotkey ' + escapeHtml(pretty(g.hotkey)) + ' copies this GIF anywhere — click to rebind, Backspace to clear'
+        : 'Bind a hotkey that copies this GIF from anywhere'}">${g.hotkey ? escapeHtml(pretty(g.hotkey)) : '⌨ key'}</button>`;
+    el.dataset.id = g.id;
     el.innerHTML = `${thumb}<span class="rm" title="Remove">×</span>` +
-      `<div class="cap">${editBtn}<span class="fname" title="${escapeHtml(g.name)}">${escapeHtml(g.name)}</span></div>`;
+      `<div class="cap"><div class="capactions">${editBtn}${keyBtn}</div>` +
+      `<span class="fname" title="${escapeHtml(g.name)}">${escapeHtml(g.name)}</span></div>`;
 
     el.querySelector('.rm').addEventListener('click', (e) => { e.stopPropagation(); removeItem(g.id); });
     const eb = el.querySelector('.capedit');
     if (eb) eb.addEventListener('click', (e) => { e.stopPropagation(); openTextEditor(g); });
+    const kb = el.querySelector('.keybind');
+    if (kb) kb.addEventListener('click', (e) => { e.stopPropagation(); startKeybind(g.id, kb); });
     if (!g.missing) el.addEventListener('click', () => copyTile(el, g));
     grid.appendChild(el);
   }
@@ -462,6 +470,111 @@ async function tsUpload() {
   await tsRefreshTray();
   if (res && res.ok && res.item) tsAdd(res.item.path);
 }
+
+// ---- GifBoard quick-keys: bind a global hotkey to a tile that copies its GIF ----
+// Unbound by default. Reuses the control-panel rebind pattern (combos + bare
+// function keys; bare letters/digits are rejected so a stray key can't hijack
+// global typing). Esc cancels, Backspace/Delete clears the binding.
+const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
+let kbListening = null; // { id, btn } or null
+
+function pretty(accel) {
+  return String(accel || '')
+    .replace('CommandOrControl', IS_MAC ? '⌘' : 'Ctrl')
+    .replace('Command', '⌘').replace('Control', 'Ctrl')
+    .replace('Shift', IS_MAC ? '⇧' : 'Shift')
+    .replace('Alt', IS_MAC ? '⌥' : 'Alt')
+    .replace(/\+/g, IS_MAC ? ' ' : '+');
+}
+
+function keyName(e) {
+  const c = e.code;
+  if (/^Key[A-Z]$/.test(c)) return c.slice(3);
+  if (/^Digit[0-9]$/.test(c)) return c.slice(5);
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(c)) return c;
+  const map = {
+    Space: 'Space', Enter: 'Return', Tab: 'Tab', Backspace: 'Backspace',
+    ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+    Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']',
+    Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Backquote: '`',
+  };
+  return map[c] || null; // ignore bare modifier keys
+}
+
+function toAccelerator(e) {
+  const mods = [];
+  if (e.metaKey) mods.push('Command');
+  if (e.ctrlKey) mods.push('Control');
+  if (e.altKey) mods.push('Alt');
+  if (e.shiftKey) mods.push('Shift');
+  const key = keyName(e);
+  if (!key) return null;            // modifier-only press → keep waiting
+  // Letters/digits need a modifier (a bare 'G' would hijack typing globally);
+  // function keys are fine on their own.
+  const isFn = /^F([1-9]|1\d|2[0-4])$/.test(key);
+  if (mods.length === 0 && !isFn) return null;
+  return [...mods, key].join('+');
+}
+
+function startKeybind(id, btn) {
+  if (kbListening) stopKeybind();
+  kbListening = { id, btn };
+  btn.classList.add('listening');
+  btn.textContent = 'press…';
+  // Suspend global shortcuts so the combo reaches this window instead of firing.
+  try { window.gifApp.suspendHotkeys(); } catch { /* ignore */ }
+}
+
+function stopKeybind(rerender = true) {
+  if (!kbListening) return;
+  kbListening.btn.classList.remove('listening');
+  kbListening = null;
+  try { window.gifApp.resumeHotkeys(); } catch { /* ignore */ }
+  if (rerender) render();
+}
+
+window.addEventListener('keydown', async (e) => {
+  if (!kbListening) return;
+  e.preventDefault();
+  if (e.key === 'Escape') { stopKeybind(); return; }
+  if (e.key === 'Backspace' || e.key === 'Delete') {
+    const { id } = kbListening;
+    const r = await window.gifApp.sbSetHotkey(id, null);
+    if (r && r.items) items = r.items;
+    stopKeybind();
+    $('hint').textContent = 'Hotkey cleared.';
+    return;
+  }
+  const accel = toAccelerator(e);
+  if (!accel) return; // wait for a non-modifier key (with a modifier, or an F-key)
+  const { id, btn } = kbListening;
+  btn.textContent = 'saving…';
+  const r = await window.gifApp.sbSetHotkey(id, accel);
+  if (r && r.ok) {
+    if (r.items) items = r.items;
+    stopKeybind();
+    $('hint').textContent = `Bound ${pretty(accel)} — press it anywhere to copy this GIF.`;
+  } else {
+    // Stay listening so the user can immediately try another combo.
+    btn.textContent = r && r.error === 'conflict' ? `${pretty(accel)} taken` : 'failed — retry';
+  }
+});
+
+// A quick-key fired in the background → flash the matching tile if it's visible.
+window.gifApp.onSbCopied(({ id, ok }) => {
+  const el = $('grid').querySelector(`.tile[data-id="${id}"]`);
+  const g = items.find((x) => x.id === id);
+  if (ok) {
+    if (el) {
+      el.classList.add('copied');
+      const veil = el.querySelector('.veil'); if (veil) veil.textContent = '✓ Copied';
+      setTimeout(() => { el.classList.remove('copied'); const v = el.querySelector('.veil'); if (v) v.textContent = 'Copy'; }, 900);
+    }
+    $('hint').textContent = g ? `Copied “${g.name}” via hotkey — paste anywhere.` : 'Copied via hotkey.';
+  } else {
+    $('hint').textContent = 'Hotkey copy failed.';
+  }
+});
 
 // ---- wire controls ----
 $('homeBtn').addEventListener('click', () => window.gifApp.closeSoundboard());

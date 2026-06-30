@@ -25,6 +25,7 @@ let controlWin = null;
 let captureWin = null;
 let soundboardWin = null;
 let bufferWin = null;   // hidden window running the instant-replay rolling buffer
+let replayActive = false; // true only once the buffer actually grabbed its source
 
 const capturesDir = () => {
   const { saveDir } = settings.load();
@@ -89,6 +90,31 @@ function createCaptureWindow() {
   });
   captureWin.loadFile(path.join(__dirname, '..', 'src', 'capture', 'index.html'));
   captureWin.once('ready-to-show', () => { if (!SMOKE) captureWin.show(); });
+  // If a webcam capture paused webcam Instant Replay to free the camera, bring
+  // it back once the capture window goes away (back button or OS close).
+  captureWin.on('closed', () => { reacquireReplay(); });
+}
+
+// --- Camera hand-off between webcam capture and webcam Instant Replay ---
+// On Windows the webcam is single-owner, so the always-on IR buffer and a
+// webcam capture can't hold it at once (the app would fight itself). When a
+// webcam capture starts we release the IR buffer; we re-arm it afterwards.
+let replaySuspendedForCapture = false;
+
+function suspendReplayForCapture() {
+  const { replay } = settings.load();
+  if (replay.enabled && replay.mode === 'webcam' && bufferWin && !bufferWin.isDestroyed()) {
+    disarmReplay();
+    replaySuspendedForCapture = true;
+    return true;
+  }
+  return false;
+}
+
+async function reacquireReplay() {
+  if (!replaySuspendedForCapture) return;
+  replaySuspendedForCapture = false;
+  if (settings.load().replay.enabled) await armReplay();
 }
 
 // --- Soundboard window (skeleton; wiring arrives in M6) ---
@@ -138,6 +164,7 @@ function runAction(kind) {
 // --- Instant Replay (Phase 2): hidden rolling-buffer window ---
 async function armReplay() {
   if (bufferWin && !bufferWin.isDestroyed()) return;
+  replayActive = false; // not recording until the buffer confirms it grabbed a source
   bufferWin = new BrowserWindow({
     width: 320, height: 200, show: false, skipTaskbar: true,
     webPreferences: {
@@ -178,14 +205,25 @@ function disarmReplay() {
     bufferWin.destroy();
   }
   bufferWin = null;
+  replayActive = false;
+}
+
+function notifyReplay(body) {
+  if (Notification.isSupported()) {
+    new Notification({ title: 'Instant Replay', body, silent: true }).show();
+  }
 }
 
 function saveReplay() {
   const { replay } = settings.load();
   if (!replay.enabled || !bufferWin || bufferWin.isDestroyed()) {
-    if (Notification.isSupported()) {
-      new Notification({ title: 'GifMayker', body: 'Instant Replay is off — turn it on first.', silent: true }).show();
-    }
+    notifyReplay('Instant Replay is off — turn it on first.');
+    return;
+  }
+  // The buffer window can exist but have never grabbed its source (e.g. the
+  // camera was busy). Saying so beats a hotkey that silently does nothing.
+  if (!replayActive) {
+    notifyReplay('Instant Replay isn’t recording — the camera may be in use by another app. Turn it off and on to retry.');
     return;
   }
   bufferWin.webContents.send('replay/save');
@@ -207,6 +245,14 @@ function registerHotkeys() {
       ok = false;
     }
     status[kind] = { accelerator: accel, registered: ok };
+  }
+  // GifBoard quick-keys: optional per-GIF global hotkeys that copy that GIF to
+  // the clipboard. Unbound by default; only items the user explicitly bound
+  // have a `hotkey`. Registered after the app hotkeys so those win any tie.
+  const { items } = library.load();
+  for (const it of items) {
+    if (!it.hotkey) continue;
+    try { globalShortcut.register(it.hotkey, () => quickCopy(it.id)); } catch { /* ignore */ }
   }
   return status;
 }
@@ -427,7 +473,43 @@ ipcMain.handle('sb/remove', (_e, id) => {
   const store = library.load();
   store.items = store.items.filter((it) => it.id !== id);
   library.save(store);
+  registerHotkeys(); // release any quick-key the removed GIF held
   return sbList();
+});
+
+// Bind (or, with accelerator=null, clear) a per-GIF quick-key. Validates the
+// combo isn't already an app hotkey or another GIF's key, then confirms the OS
+// accepted it (else rolls back), mirroring the app-hotkey rebind flow.
+ipcMain.handle('sb/set-hotkey', (_e, { id, accelerator }) => {
+  const store = library.load();
+  const it = store.items.find((x) => x.id === id);
+  if (!it) return { ok: false, error: 'not found', items: sbList() };
+
+  if (!accelerator) { // clear the binding
+    delete it.hotkey;
+    library.save(store);
+    registerHotkeys();
+    return { ok: true, items: sbList() };
+  }
+
+  const appAccels = Object.values(settings.load().hotkeys);
+  const takenByOther = store.items.some((x) => x.id !== id && x.hotkey === accelerator);
+  if (appAccels.includes(accelerator) || takenByOther) {
+    return { ok: false, error: 'conflict', items: sbList() };
+  }
+
+  const previous = it.hotkey;
+  it.hotkey = accelerator;
+  library.save(store);
+  registerHotkeys();
+  // If the OS/another app already owns the combo it won't register — roll back.
+  if (!globalShortcut.isRegistered(accelerator)) {
+    if (previous) it.hotkey = previous; else delete it.hotkey;
+    library.save(store);
+    registerHotkeys();
+    return { ok: false, error: 'conflict', items: sbList() };
+  }
+  return { ok: true, items: sbList() };
 });
 
 // --- Sticker recents: user-uploaded images, copied in so they persist + reuse ---
@@ -507,7 +589,7 @@ ipcMain.handle('captures/delete-gif', async (_e, file) => {
   const store = library.load();
   const before = store.items.length;
   store.items = store.items.filter((it) => it.path !== file);
-  if (store.items.length !== before) library.save(store);
+  if (store.items.length !== before) { library.save(store); registerHotkeys(); } // release a freed quick-key
   return { ok: true, items: sbList() };
 });
 
@@ -539,11 +621,20 @@ ipcMain.handle('captures/list-gifs', () => {
 // Surface buffer-capture failures (e.g., on Windows) so they're not silent.
 ipcMain.handle('replay/error', (_e, msg) => {
   console.error('[replay] buffer error:', msg);
-  if (Notification.isSupported()) {
-    new Notification({ title: 'Instant Replay', body: `Couldn't start recording: ${msg}`, silent: true }).show();
-  }
+  replayActive = false;
+  notifyReplay(`Couldn't start recording — ${msg}`);
   return true;
 });
+
+// The buffer reports whether it actually grabbed its source, so Save Replay can
+// tell "recording" from "armed but the camera/screen never opened".
+ipcMain.handle('replay/armed', (_e, ok) => { replayActive = !!ok; return true; });
+
+// A webcam capture is about to open the camera — free it from the IR buffer.
+// Returns true if we actually released it (so the renderer can wait a beat for
+// the device to come free before calling getUserMedia).
+ipcMain.handle('replay/suspend-for-capture', () => suspendReplayForCapture());
+ipcMain.handle('replay/reacquire', () => reacquireReplay());
 
 ipcMain.handle('replay/get', () => settings.load().replay);
 
@@ -583,7 +674,10 @@ ipcMain.handle('replay/set-enabled', async (_e, on) => {
   const cfg = settings.load();
   cfg.replay.enabled = !!on;
   settings.save(cfg);
-  if (cfg.replay.enabled) await armReplay(); else disarmReplay();
+  // Disarm first so enabling always builds a FRESH buffer — that's what triggers
+  // the camera restart cycle (open→close→reopen) in webcam mode, and clears any
+  // stale/dead buffer window left from a failed launch auto-arm.
+  if (cfg.replay.enabled) { disarmReplay(); await armReplay(); } else disarmReplay();
   return cfg.replay;
 });
 
@@ -970,7 +1064,9 @@ ipcMain.handle('gif/add-text', (_e, { src, layers = [], bars = null }) => {
 // PNG. On macOS we instead put the file itself on the pasteboard (public.file-url)
 // so pasting into Discord/Slack/iMessage attaches the *animated* file. Other
 // platforms fall back to a static image (best effort until per-OS handling lands).
-ipcMain.handle('capture/copy-gif', async (_e, file) => {
+// Copy a GIF file to the clipboard so pasting attaches the ANIMATED gif.
+// Shared by the soundboard click, the capture flow, and GifBoard quick-keys.
+async function copyGifFile(file) {
   try {
     if (!file || !fs.existsSync(file)) return { ok: false, error: 'file not found' };
     if (process.platform === 'darwin') {
@@ -998,4 +1094,19 @@ ipcMain.handle('capture/copy-gif', async (_e, file) => {
   } catch (e) {
     return { ok: false, error: e.message };
   }
-});
+}
+
+ipcMain.handle('capture/copy-gif', (_e, file) => copyGifFile(file));
+
+// Copy a specific board GIF by id — fired by a GifBoard quick-key (a per-GIF
+// global hotkey). Flashes the matching tile if the board window is open.
+async function quickCopy(id) {
+  const { items } = library.load();
+  const it = items.find((x) => x.id === id);
+  if (!it) return;
+  const r = await copyGifFile(it.path);
+  console.log(`[quickkey] copy ${id}: ${r && r.ok ? 'ok' : 'failed'}`);
+  if (soundboardWin && !soundboardWin.isDestroyed()) {
+    soundboardWin.webContents.send('sb/copied', { id, ok: !!(r && r.ok) });
+  }
+}

@@ -5,6 +5,25 @@
 const $ = (id) => document.getElementById(id);
 const MAX_MS = 60_000; // 1-minute cap (raise later once the encoder is proven)
 
+// Turn a getUserMedia DOMException into a message a human can act on. The big
+// one on Windows: a webcam can only be opened by ONE app at a time, so if
+// Discord/Zoom — or GifMayker's own Instant Replay — already holds it, the
+// open fails with NotReadableError/TrackStartError ("Could not start video
+// source"). macOS shares the camera, so this only bites on Windows.
+function camGumMessage(e, isWebcam) {
+  const name = e && e.name;
+  if (isWebcam && (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError')) {
+    return 'Your camera is in use by another app (Discord, Zoom, or GifMayker’s own Instant Replay). Close it there — or turn off Instant Replay — then try again.';
+  }
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return isWebcam ? 'Camera access was blocked — grant Camera permission and try again.' : 'Screen Recording access was blocked.';
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return isWebcam ? 'That camera wasn’t found — pick a different camera.' : 'That screen or window wasn’t found.';
+  }
+  return (isWebcam ? 'Couldn’t start the camera: ' : 'Couldn’t start capture: ') + ((e && e.message) || name || 'unknown error');
+}
+
 let selected = null;     // { id, name }
 let stream = null;
 let recorder = null;
@@ -158,35 +177,53 @@ async function startRecording() {
       return;
     }
     $('camPerm').classList.remove('show');
+    // On Windows the webcam is single-owner — if our own webcam Instant Replay
+    // is holding it in the background, free it first (then wait a beat for the
+    // device to actually release before we open it here).
+    try {
+      const released = await window.gifApp.suspendReplayForCapture();
+      if (released) await new Promise((r) => setTimeout(r, 300));
+    } catch { /* non-fatal */ }
   }
 
+  const constraints = isWebcam
+    ? {
+        audio: false,
+        video: {
+          ...(selected.deviceId ? { deviceId: { exact: selected.deviceId } } : {}),
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        },
+      }
+    : {
+        audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: selected.id,
+            maxFrameRate: 30,
+            maxWidth: 1920,
+            maxHeight: 1080,
+          },
+        },
+      };
   try {
-    stream = await navigator.mediaDevices.getUserMedia(
-      isWebcam
-        ? {
-            audio: false,
-            video: {
-              ...(selected.deviceId ? { deviceId: { exact: selected.deviceId } } : {}),
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-              frameRate: { ideal: 30 },
-            },
-          }
-        : {
-            audio: false,
-            video: {
-              mandatory: {
-                chromeMediaSource: 'desktop',
-                chromeMediaSourceId: selected.id,
-                maxFrameRate: 30,
-                maxWidth: 1920,
-                maxHeight: 1080,
-              },
-            },
-          }
-    );
+    if (isWebcam) {
+      // Restart the camera first: a clean open → close → reopen cycle clears a
+      // stuck pipeline so it gives real frames instead of a black screen. A
+      // genuinely busy camera throws on this first open → caught below.
+      const probe = await navigator.mediaDevices.getUserMedia(constraints);
+      probe.getTracks().forEach((t) => t.stop());
+      await new Promise((r) => setTimeout(r, 350)); // let the device release
+    }
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
   } catch (e) {
-    $('hint').textContent = `Capture failed: ${e.message}`;
+    console.error('[capture] getUserMedia failed:', e.name, e.message);
+    // Show the technical error name in brackets too — a temporary diagnostic so
+    // we can pin down the Windows webcam failure (NotReadable vs Overconstrained
+    // vs NotFound each need a different fix).
+    $('hint').textContent = `${camGumMessage(e, isWebcam)}  [${e.name}: ${e.message || 'no detail'}]`;
     return;
   }
 
