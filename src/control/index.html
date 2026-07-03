@@ -45,6 +45,23 @@
     .gear:hover { border-color: var(--border-hover); color: var(--text); }
     .gear.on { border-color: var(--accent); }  /* armed indicator: trim-colored outline */
     .gear svg { width: 16px; height: 16px; }
+    /* home-panel record button: filled accent when idle (call to action),
+       quiet outline with a red dot while recording */
+    .recbtn {
+      font-size: 11.5px; font-weight: 600; white-space: nowrap; cursor: pointer;
+      border-radius: 8px; padding: 6px 11px; margin-right: 8px;
+      border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent);
+    }
+    .recbtn:hover { filter: brightness(1.06); }
+    .recbtn.rec { background: var(--btn); border-color: var(--border-strong); color: var(--muted-2); font-weight: 500; }
+    .recbtn.rec:hover { border-color: var(--border-hover); }
+    .recdot { color: #ff5b5b; }
+    .sp-status { font-size: 12px; color: var(--muted-2); }
+    .sp-start {
+      font-size: 12px; border-radius: 8px; padding: 6px 12px; cursor: pointer;
+      border: 1px solid var(--border-strong); background: var(--btn); color: var(--text);
+    }
+    .sp-start:hover { border-color: var(--border-hover); }
     .sel { padding: 6px 8px; } /* .sel base shared in theme.css */
     /* settings modal — shell shared in theme.css; only window-specific sizing here */
     .modal-card { width: 300px; }
@@ -122,6 +139,7 @@
     <div class="row" id="row-saveReplay">
       <span class="meta"><span class="name">Instant Replay</span><span class="sub" id="replaySub">Always recording — save the last 30s</span></span>
       <span class="spacer"></span>
+      <button class="recbtn" id="replayRec">▶ Start recording</button>
       <button class="gear" id="replayGear" title="Instant Replay settings" aria-label="Instant Replay settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
@@ -134,6 +152,10 @@
       <div class="sp-row">
         <span class="sp-label">Enabled</span>
         <button class="toggle" id="replayToggle" aria-pressed="false">Off</button>
+      </div>
+      <div class="sp-row" id="replayStatusRow" style="display:none">
+        <span class="sp-status"><span class="dot" id="replayDot"></span><span id="replayStatusText">Recording</span></span>
+        <button class="sp-start" id="replayStart" style="display:none">Start recording</button>
       </div>
       <div class="sp-row">
         <span class="sp-label">Source</span>

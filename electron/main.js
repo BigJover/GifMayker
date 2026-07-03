@@ -216,6 +216,41 @@ function disarmReplay() {
   replayActive = false;
 }
 
+// Push the live replay state (does the buffer actually hold its source?) to the
+// control window so its toggle/status reflects reality — e.g. a webcam that's
+// enabled but not recording because it's launch-deferred or the camera is busy.
+function broadcastReplayState() {
+  if (controlWin && !controlWin.isDestroyed()) {
+    const { replay } = settings.load();
+    controlWin.webContents.send('replay/state', {
+      enabled: replay.enabled, mode: replay.mode, armed: replayActive,
+    });
+  }
+}
+
+// Arm the buffer for an already-enabled replay (used to "Start"/"Retry" a webcam
+// that was launch-deferred or whose camera was busy). Fresh buffer each time so
+// the webcam restart cycle runs.
+async function rearmReplay() {
+  const { replay } = settings.load();
+  if (!replay.enabled) return { enabled: false, mode: replay.mode, armed: false };
+  disarmReplay();
+  await armReplay();
+  // Don't broadcast here: the buffer reports the real armed state via replay/armed
+  // (success) or replay/error (failure) once it actually grabs the source, and
+  // that push settles the UI. Broadcasting the still-false state now would flash.
+  return { enabled: true, mode: replay.mode, armed: replayActive };
+}
+
+// Stop the buffer but KEEP the enabled preference — a "pause recording" that the
+// user can resume with Start. (Turning the toggle Off would forget the setting.)
+function pauseReplay() {
+  disarmReplay();
+  broadcastReplayState();
+  const { replay } = settings.load();
+  return { enabled: replay.enabled, mode: replay.mode, armed: replayActive };
+}
+
 function notifyReplay(body) {
   if (Notification.isSupported()) {
     new Notification({ title: 'Instant Replay', body, silent: true }).show();
@@ -317,7 +352,21 @@ if (gotSingleInstanceLock) app.whenReady().then(() => {
   const status = registerHotkeys();
   console.log('[hotkeys] registration:', JSON.stringify(status));
 
-  if (settings.load().replay.enabled) armReplay();
+  // Auto-arm on launch for SCREEN replay only (screen capture is shareable and
+  // has no camera light). Webcam replay is intentionally NOT auto-armed: grabbing
+  // the camera every launch turns the light on and, on Windows' single-owner
+  // camera, blocks other apps. The user starts webcam replay explicitly from the
+  // gear modal ("Start recording"); the toggle just remembers the preference.
+  {
+    const r = settings.load().replay;
+    if (r.enabled && r.mode !== 'webcam') armReplay();
+    else if (r.enabled && r.mode === 'webcam') {
+      // Webcam replay isn't auto-armed on launch (see above). Not every webcam
+      // has a recording light, so pop a reminder that it's on but idle until the
+      // user presses Start.
+      notifyReplay('Instant Replay is on, but your webcam isn’t recording yet — open GifMayker and press “Start recording”.');
+    }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createControlWindow();
@@ -743,13 +792,42 @@ ipcMain.handle('captures/list-gifs', () => {
 ipcMain.handle('replay/error', (_e, msg) => {
   console.error('[replay] buffer error:', msg);
   replayActive = false;
+  broadcastReplayState();
   notifyReplay(`Couldn't start recording — ${msg}`);
   return true;
 });
 
 // The buffer reports whether it actually grabbed its source, so Save Replay can
 // tell "recording" from "armed but the camera/screen never opened".
-ipcMain.handle('replay/armed', (_e, ok) => { replayActive = !!ok; return true; });
+ipcMain.handle('replay/armed', (_e, ok) => {
+  replayActive = !!ok;
+  broadcastReplayState();
+  return true;
+});
+
+// Live state (enabled + whether the buffer is truly recording) for the control
+// window's status/toggle. Distinct from replay/get, which is just the settings.
+ipcMain.handle('replay/state', () => {
+  const { replay } = settings.load();
+  return { enabled: replay.enabled, mode: replay.mode, armed: replayActive };
+});
+
+// Start/Retry recording for an already-enabled replay (launch-deferred webcam,
+// or a camera that was busy on the first try).
+ipcMain.handle('replay/rearm', () => rearmReplay());
+// Pause recording but keep Instant Replay enabled (resume later with Start).
+ipcMain.handle('replay/pause', () => pauseReplay());
+// One-click "enter Instant Replay" from the home panel: enable it if it's off
+// (using whatever source/camera is configured in the gear), then start recording.
+ipcMain.handle('replay/start-recording', async () => {
+  const cfg = settings.load();
+  if (!cfg.replay.enabled) { cfg.replay.enabled = true; settings.save(cfg); }
+  disarmReplay();
+  await armReplay();
+  // Armed state settles via the buffer's replay/state push; don't broadcast the
+  // intermediate not-yet-armed value here (avoids a flash).
+  return { enabled: true, mode: cfg.replay.mode, armed: replayActive };
+});
 
 // A webcam capture is about to open the camera — free it from the IR buffer.
 // Returns true if we actually released it (so the renderer can wait a beat for
@@ -799,6 +877,7 @@ ipcMain.handle('replay/set-enabled', async (_e, on) => {
   // the camera restart cycle (open→close→reopen) in webcam mode, and clears any
   // stale/dead buffer window left from a failed launch auto-arm.
   if (cfg.replay.enabled) { disarmReplay(); await armReplay(); } else disarmReplay();
+  broadcastReplayState();
   return cfg.replay;
 });
 

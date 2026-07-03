@@ -55,6 +55,11 @@ contextBridge.exposeInMainWorld('gifApp', {
 
   // Instant Replay (Phase 2)
   getReplay: () => ipcRenderer.invoke('replay/get'),
+  getReplayState: () => ipcRenderer.invoke('replay/state'),
+  rearmReplay: () => ipcRenderer.invoke('replay/rearm'),
+  pauseReplay: () => ipcRenderer.invoke('replay/pause'),
+  startRecording: () => ipcRenderer.invoke('replay/start-recording'),
+  onReplayState: (cb) => ipcRenderer.on('replay/state', (_e, s) => cb(s)),
   setReplayEnabled: (on) => ipcRenderer.invoke('replay/set-enabled', on),
   setReplaySeconds: (s) => ipcRenderer.invoke('replay/set-seconds', s),
   listScreens: () => ipcRenderer.invoke('replay/list-screens'),

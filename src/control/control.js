@@ -142,12 +142,49 @@ function applyReplayState(r) {
     t.textContent = r.enabled ? 'On' : 'Off';
     t.setAttribute('aria-pressed', r.enabled ? 'true' : 'false');
   }
-  const gear = $('replayGear'); if (gear) gear.classList.toggle('on', !!r.enabled);
   const secs = $('replaySeconds'); if (secs) secs.value = String(r.seconds);
   const mode = r.mode === 'webcam' ? 'webcam' : 'screen';
   const modeSel = $('replayMode'); if (modeSel) modeSel.value = mode;
   applyReplayMode(mode);
   const sub = $('replaySub'); if (sub) sub.textContent = `Always recording — save the last ${r.seconds}s`;
+}
+
+// Reflect the buffer's LIVE state (is it actually recording?) — separate from the
+// persisted on/off. A webcam that's enabled but not recording (launch-deferred, or
+// its camera is busy) shows an amber "Not recording" with a Start/Retry button.
+function renderReplayStatus(st) {
+  const row = $('replayStatusRow');
+  const gear = $('replayGear'); if (gear) gear.classList.toggle('on', !!(st && st.armed));
+  // Keep the modal toggle in sync when state arrives via a push (not just the
+  // toggle's own click), e.g. starting Instant Replay from the home button.
+  const t = $('replayToggle');
+  if (t && st) {
+    t.classList.toggle('on', !!st.enabled);
+    t.textContent = st.enabled ? 'On' : 'Off';
+    t.setAttribute('aria-pressed', st.enabled ? 'true' : 'false');
+  }
+  // Home-panel record button is ALWAYS visible so Instant Replay is one click
+  // away without opening the gear: "● Recording" (click to pause) when live,
+  // "▶ Start recording" otherwise (starts — enabling IR first if it's off).
+  const rec = $('replayRec');
+  if (rec) {
+    if (st && st.armed) { rec.className = 'recbtn rec'; rec.innerHTML = '<span class="recdot">●</span> Recording'; }
+    else { rec.className = 'recbtn'; rec.textContent = '▶ Start recording'; }
+  }
+  if (!row) return;
+  if (!st || !st.enabled) { row.style.display = 'none'; return; }
+  row.style.display = '';
+  const dot = $('replayDot'); const txt = $('replayStatusText'); const start = $('replayStart');
+  const webcam = st.mode === 'webcam';
+  if (st.armed) {
+    if (dot) dot.classList.remove('warn');
+    if (txt) txt.textContent = 'Recording';
+    if (start) start.style.display = 'none';
+  } else {
+    if (dot) dot.classList.add('warn');
+    if (txt) txt.textContent = webcam ? 'Not recording — camera idle' : 'Not recording';
+    if (start) { start.style.display = ''; start.textContent = webcam ? 'Start recording' : 'Retry'; start.disabled = false; }
+  }
 }
 
 // Show the right source picker (monitor vs camera) and adjust the note.
@@ -187,6 +224,7 @@ async function populateCameras() {
 }
 async function refreshReplay() {
   try { applyReplayState(await window.gifApp.getReplay()); } catch { /* ignore */ }
+  try { renderReplayStatus(await window.gifApp.getReplayState()); } catch { /* ignore */ }
 }
 async function populateScreens() {
   const sel = $('replayScreen');
@@ -225,7 +263,29 @@ try {
     const turnOn = !$('replayToggle').classList.contains('on');
     $('replayToggle').textContent = '…';
     try { applyReplayState(await window.gifApp.setReplayEnabled(turnOn)); } catch { refreshReplay(); }
+    // Buffer arms asynchronously; the pushed replay/state will update the status,
+    // but render the immediate (enabled, not-yet-armed) picture right away.
+    try { renderReplayStatus(await window.gifApp.getReplayState()); } catch { /* ignore */ }
   });
+  $('replayStart')?.addEventListener('click', async () => {
+    const b = $('replayStart'); b.disabled = true; b.textContent = 'Starting…';
+    // Final state arrives via the replay/state push once the buffer grabs (or
+    // fails to grab) its source — don't render the still-arming return value.
+    try { await window.gifApp.rearmReplay(); } catch { refreshReplay(); }
+  });
+  $('replayRec')?.addEventListener('click', async () => {
+    const rec = $('replayRec');
+    if (rec.classList.contains('rec')) {
+      // Currently recording → pause (keeps Instant Replay enabled).
+      try { renderReplayStatus(await window.gifApp.pauseReplay()); } catch { refreshReplay(); }
+    } else {
+      // Start — enabling Instant Replay first if it's off. Final state arrives via
+      // the replay/state push; show "Starting…" until then.
+      rec.className = 'recbtn'; rec.textContent = 'Starting…';
+      try { await window.gifApp.startRecording(); } catch { refreshReplay(); }
+    }
+  });
+  window.gifApp.onReplayState?.(renderReplayStatus);
   $('replaySeconds')?.addEventListener('change', async () => {
     try { applyReplayState(await window.gifApp.setReplaySeconds(Number($('replaySeconds').value))); } catch { refreshReplay(); }
   });
