@@ -56,6 +56,14 @@
     .recbtn.rec { background: var(--btn); border-color: var(--border-strong); color: var(--muted-2); font-weight: 500; }
     .recbtn.rec:hover { border-color: var(--border-hover); }
     .recdot { color: #ff5b5b; }
+    /* PiP camera-corner picker: a 2×2 grid mirroring the screen corners */
+    .corners { display: grid; grid-template-columns: 22px 22px; gap: 4px; }
+    .corners button {
+      width: 22px; height: 22px; font-size: 12px; line-height: 1; cursor: pointer;
+      border-radius: 5px; border: 1px solid var(--border-strong); background: var(--btn); color: var(--muted-2);
+    }
+    .corners button:hover { border-color: var(--border-hover); }
+    .corners button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
     .sp-status { font-size: 12px; color: var(--muted-2); }
     .sp-start {
       font-size: 12px; border-radius: 8px; padding: 6px 12px; cursor: pointer;
@@ -162,6 +170,7 @@
         <select class="sel" id="replayMode" style="max-width:170px">
           <option value="screen">Screen</option>
           <option value="webcam">Webcam</option>
+          <option value="pip">Screen + Webcam</option>
         </select>
       </div>
       <div class="sp-row" id="replayScreenRow">

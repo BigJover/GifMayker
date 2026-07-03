@@ -111,7 +111,8 @@ let replaySuspendedForCapture = false;
 
 function suspendReplayForCapture() {
   const { replay } = settings.load();
-  if (replay.enabled && replay.mode === 'webcam' && bufferWin && !bufferWin.isDestroyed()) {
+  const usesCamera = replay.mode === 'webcam' || replay.mode === 'pip';
+  if (replay.enabled && usesCamera && bufferWin && !bufferWin.isDestroyed()) {
     disarmReplay();
     replaySuspendedForCapture = true;
     return true;
@@ -184,18 +185,21 @@ async function armReplay() {
   });
   await bufferWin.loadFile(path.join(__dirname, '..', 'src', 'buffer', 'index.html'));
   const { replay } = settings.load();
+  const needsCamera = replay.mode === 'webcam' || replay.mode === 'pip';
+
+  // Webcam and PiP both open the camera: make sure Camera access is granted.
+  if (needsCamera && process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('camera') !== 'granted') {
+    try { await systemPreferences.askForMediaAccess('camera'); } catch { /* handled in buffer */ }
+  }
 
   if (replay.mode === 'webcam') {
-    // Webcam buffer: make sure Camera access is granted, then let the buffer
-    // window grab the chosen camera by deviceId (null = default camera).
-    if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('camera') !== 'granted') {
-      try { await systemPreferences.askForMediaAccess('camera'); } catch { /* handled in buffer */ }
-    }
+    // Webcam buffer: grab the chosen camera by deviceId (null = default camera).
     bufferWin.webContents.send('replay/start', { mode: 'webcam', deviceId: replay.deviceId, seconds: replay.seconds });
     return;
   }
 
-  // Screen buffer: pick the chosen monitor (or the first) to continuously buffer.
+  // Screen and PiP both continuously buffer a monitor; PiP also composites the
+  // webcam over it. Pick the chosen monitor (or the first).
   let srcId = null;
   try {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
@@ -204,7 +208,13 @@ async function armReplay() {
     chosen = chosen || sources[0];
     if (chosen) srcId = chosen.id;
   } catch (e) { console.error('[replay] getSources failed:', e.message); }
-  bufferWin.webContents.send('replay/start', { mode: 'screen', sourceId: srcId, seconds: replay.seconds });
+  bufferWin.webContents.send('replay/start', {
+    mode: replay.mode, // 'screen' or 'pip'
+    sourceId: srcId,
+    deviceId: replay.deviceId, // used only by 'pip'
+    seconds: replay.seconds,
+    pip: replay.pip,           // used only by 'pip'
+  });
 }
 
 function disarmReplay() {
@@ -359,12 +369,13 @@ if (gotSingleInstanceLock) app.whenReady().then(() => {
   // gear modal ("Start recording"); the toggle just remembers the preference.
   {
     const r = settings.load().replay;
-    if (r.enabled && r.mode !== 'webcam') armReplay();
-    else if (r.enabled && r.mode === 'webcam') {
-      // Webcam replay isn't auto-armed on launch (see above). Not every webcam
-      // has a recording light, so pop a reminder that it's on but idle until the
-      // user presses Start.
-      notifyReplay('Instant Replay is on, but your webcam isn’t recording yet — open GifMayker and press “Start recording”.');
+    const usesCamera = r.mode === 'webcam' || r.mode === 'pip';
+    if (r.enabled && !usesCamera) armReplay();
+    else if (r.enabled && usesCamera) {
+      // Camera-using replay (webcam or PiP) isn't auto-armed on launch (see
+      // above). Not every webcam has a recording light, so pop a reminder that
+      // it's on but idle until the user presses Start.
+      notifyReplay('Instant Replay is on, but your camera isn’t recording yet — open GifMayker and press “Start recording”.');
     }
   }
 
@@ -817,6 +828,9 @@ ipcMain.handle('replay/state', () => {
 ipcMain.handle('replay/rearm', () => rearmReplay());
 // Pause recording but keep Instant Replay enabled (resume later with Start).
 ipcMain.handle('replay/pause', () => pauseReplay());
+// A non-fatal heads-up from the buffer (e.g. PiP fell back to screen-only because
+// the webcam was busy) — just notify, don't touch the armed state.
+ipcMain.handle('replay/notice', (_e, msg) => { notifyReplay(String(msg || '')); return true; });
 // One-click "enter Instant Replay" from the home panel: enable it if it's off
 // (using whatever source/camera is configured in the gear), then start recording.
 ipcMain.handle('replay/start-recording', async () => {
@@ -855,7 +869,7 @@ ipcMain.handle('replay/set-screen', async (_e, displayId) => {
 
 ipcMain.handle('replay/set-mode', async (_e, mode) => {
   const cfg = settings.load();
-  cfg.replay.mode = mode === 'webcam' ? 'webcam' : 'screen';
+  cfg.replay.mode = mode === 'webcam' ? 'webcam' : mode === 'pip' ? 'pip' : 'screen';
   settings.save(cfg);
   if (cfg.replay.enabled) { disarmReplay(); await armReplay(); } // re-arm on the new source
   return cfg.replay;
@@ -865,7 +879,20 @@ ipcMain.handle('replay/set-camera', async (_e, deviceId) => {
   const cfg = settings.load();
   cfg.replay.deviceId = deviceId || null;
   settings.save(cfg);
-  if (cfg.replay.enabled && cfg.replay.mode === 'webcam') { disarmReplay(); await armReplay(); }
+  const usesCamera = cfg.replay.mode === 'webcam' || cfg.replay.mode === 'pip';
+  if (cfg.replay.enabled && usesCamera) { disarmReplay(); await armReplay(); }
+  return cfg.replay;
+});
+
+// PiP layout (which corner the webcam sits in + its size). Re-arm when live so
+// the compositor picks up the new layout.
+ipcMain.handle('replay/set-pip', async (_e, patch) => {
+  const cfg = settings.load();
+  const p = patch || {};
+  if (p.corner && ['tl', 'tr', 'bl', 'br'].includes(p.corner)) cfg.replay.pip.corner = p.corner;
+  if (typeof p.size === 'number') cfg.replay.pip.size = Math.max(0.12, Math.min(0.45, p.size));
+  settings.save(cfg);
+  if (cfg.replay.enabled && cfg.replay.mode === 'pip') { disarmReplay(); await armReplay(); }
   return cfg.replay;
 });
 
@@ -891,9 +918,9 @@ ipcMain.handle('replay/set-seconds', async (_e, secs) => {
 
 // The buffer window submits its kept segments; concat them into one clip and
 // open it in the Capture editor (trim/crop/GIF flow).
-ipcMain.handle('replay/submit', (_e, buffers) => {
-  return new Promise((resolve) => {
-    if (!buffers || !buffers.length) { resolve({ ok: false, error: 'empty buffer' }); return; }
+// Concat one track's WebM segments into a single file (stream copy, no re-encode).
+function concatSegments(buffers, outPath) {
+  return new Promise((resolve, reject) => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-replay-'));
     const files = buffers.map((buf, i) => {
       const p = path.join(tmp, `seg${String(i).padStart(3, '0')}.webm`);
@@ -902,28 +929,58 @@ ipcMain.handle('replay/submit', (_e, buffers) => {
     });
     const listPath = path.join(tmp, 'list.txt');
     fs.writeFileSync(listPath, files.map((f) => `file '${f}'`).join('\n'));
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const out = path.join(capturesDir(), `replay-${stamp}.webm`);
-    const proc = spawn(ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', out]);
+    const proc = spawn(ffmpegPath, ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outPath]);
     let err = '';
     proc.stderr.on('data', (d) => { err += d.toString(); });
-    proc.on('error', (e) => resolve({ ok: false, error: e.message }));
+    proc.on('error', (e) => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ } reject(e); });
     proc.on('close', (code) => {
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
-      if (code === 0 && fs.existsSync(out)) {
-        openClipInEditor(out);
-        resolve({ ok: true, path: out });
-      } else {
-        resolve({ ok: false, error: `concat failed (${code}): ${err.slice(-300)}` });
-      }
+      if (code === 0 && fs.existsSync(outPath)) resolve(outPath);
+      else reject(new Error(`concat failed (${code}): ${err.slice(-300)}`));
     });
   });
+}
+
+// payload = { screen?: [ArrayBuffer…], webcam?: [ArrayBuffer…] }. Screen-only and
+// webcam-only replays produce one file and open normally; a PiP replay produces
+// TWO files (screen base + webcam) and opens with the webcam as a video sticker.
+ipcMain.handle('replay/submit', async (_e, payload) => {
+  const p = payload || {};
+  const hasScreen = Array.isArray(p.screen) && p.screen.length;
+  const hasWebcam = Array.isArray(p.webcam) && p.webcam.length;
+  if (!hasScreen && !hasWebcam) return { ok: false, error: 'empty buffer' };
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  try {
+    if (hasScreen && hasWebcam) {
+      const screen = await concatSegments(p.screen, path.join(capturesDir(), `replay-${stamp}.webm`));
+      const webcam = await concatSegments(p.webcam, path.join(capturesDir(), `replay-${stamp}-cam.webm`));
+      openPipInEditor(screen, webcam);
+      return { ok: true, path: screen, webcam };
+    }
+    // Single track (screen-only or webcam-only fallback).
+    const only = hasScreen ? p.screen : p.webcam;
+    const out = await concatSegments(only, path.join(capturesDir(), `replay-${stamp}.webm`));
+    openClipInEditor(out);
+    return { ok: true, path: out };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 });
 
 // Open an existing clip in the Capture window's editor.
 function openClipInEditor(file) {
   createCaptureWindow();
   const send = () => { if (captureWin && !captureWin.isDestroyed()) captureWin.webContents.send('capture/load-clip', file); };
+  if (captureWin.webContents.isLoading()) captureWin.webContents.once('did-finish-load', send);
+  else send();
+}
+
+// Open a PiP replay: the screen as the base clip + the webcam as a movable video
+// sticker overlay. The editor loads `screen` for trim/crop and adds `webcam` as a
+// draggable/resizable/layerable video overlay, composited at GIF-export time.
+function openPipInEditor(screen, webcam) {
+  createCaptureWindow();
+  const send = () => { if (captureWin && !captureWin.isDestroyed()) captureWin.webContents.send('capture/load-pip', { screen, webcam }); };
   if (captureWin.webContents.isLoading()) captureWin.webContents.once('did-finish-load', send);
   else send();
 }
@@ -1104,14 +1161,18 @@ function buildDrawtext(cap) {
 // when there are no overlays. capDir holds font.ttf, c*.txt and the copied sticker
 // images; ffmpeg MUST run with cwd=capDir so every filter/-i ref is a bare
 // filename — a Windows absolute path's drive colon breaks the filtergraph.
-function prepOverlays(layers) {
+function prepOverlays(layers, opts = {}) {
+  const webcamSrc = opts.webcamSrc && fs.existsSync(opts.webcamSrc) ? opts.webcamSrc : null;
+  const trimStart = Number(opts.trimStart) || 0;
   const ls = Array.isArray(layers) ? layers.filter((l) => l && (
     l.kind === 'text' ? String(l.text || '').length
-      : l.kind === 'sticker' && l.path && fs.existsSync(l.path))) : [];
+      : l.kind === 'sticker' ? (l.path && fs.existsSync(l.path))
+        : l.kind === 'webcam' ? !!webcamSrc
+          : false)) : [];
   if (!ls.length) return null;
   const capDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gm-ov-'));
   const nodes = [];
-  const stickerArgs = []; // ffmpeg -i flags for the sticker images, in node order
+  const inputArgs = []; // ffmpeg -i flags for image stickers + the webcam video, in node order
   let txtN = 0, skN = 0, needFont = false;
   for (const l of ls) {
     if (l.kind === 'text') {
@@ -1119,27 +1180,35 @@ function prepOverlays(layers) {
       fs.writeFileSync(path.join(capDir, name), String(l.text), 'utf8');
       nodes.push({ kind: 'text', drawtext: buildDrawtext({ textfile: name, fx: l.fx, fy: l.fy, size: l.size, color: l.color }) });
       needFont = true;
+    } else if (l.kind === 'webcam') {
+      // The webcam is a VIDEO overlay input. A per-input -ss aligns it with the
+      // trimmed base (both recorded over the same window). Absolute path is safe
+      // here — it's an -i argv token, not inside the filtergraph.
+      if (trimStart > 0) inputArgs.push('-ss', String(trimStart));
+      inputArgs.push('-i', webcamSrc);
+      nodes.push({ kind: 'overlay', w: Math.max(1, Math.round(Number(l.w) || 1)), h: Math.max(1, Math.round(Number(l.h) || 1)), fx: l.fx, fy: l.fy });
     } else {
       const ext = (path.extname(l.path) || '.png').toLowerCase();
       const name = `s${skN++}${ext}`;
       fs.copyFileSync(l.path, path.join(capDir, name));
-      stickerArgs.push('-i', name);
-      nodes.push({ kind: 'sticker', w: Math.max(1, Math.round(Number(l.w) || 1)), h: Math.max(1, Math.round(Number(l.h) || 1)), fx: l.fx, fy: l.fy });
+      inputArgs.push('-i', name);
+      nodes.push({ kind: 'overlay', w: Math.max(1, Math.round(Number(l.w) || 1)), h: Math.max(1, Math.round(Number(l.h) || 1)), fx: l.fx, fy: l.fy });
     }
   }
   if (needFont) fs.copyFileSync(captionFontPath, path.join(capDir, 'font.ttf'));
-  return { capDir, nodes, stickerArgs, hasStickers: stickerArgs.length > 0 };
+  return { capDir, nodes, inputArgs, hasInputs: inputArgs.length > 0 };
 }
 
-ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null, crop = null, speed = 1, outSeconds = 0, layers = [], bars = null }) => {
+ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null, crop = null, speed = 1, outSeconds = 0, layers = [], bars = null, webcamSrc = null }) => {
   return new Promise((resolve) => {
     if (!src || !fs.existsSync(src)) { resolve({ ok: false, error: 'source file not found' }); return; }
     const out = src.replace(/\.webm$/i, '') + '.gif';
     const w = Number(width);
 
-    // Overlays (text + stickers) live in a temp dir; ffmpeg runs with cwd there.
+    // Overlays (text + image stickers + the webcam video) live in a temp dir;
+    // ffmpeg runs with cwd there. The webcam is seeked to match the trimmed base.
     let ov = null;
-    try { ov = prepOverlays(layers); } catch { ov = null; } // best-effort; never block the GIF
+    try { ov = prepOverlays(layers, { webcamSrc, trimStart: trim ? trim.start : 0 }); } catch { ov = null; } // best-effort; never block the GIF
     const capDir = ov ? ov.capDir : null;
     const cleanupTmp = () => { if (capDir) { try { fs.rmSync(capDir, { recursive: true, force: true }); } catch { /* ignore */ } } };
 
@@ -1162,16 +1231,16 @@ ipcMain.handle('capture/to-gif', (_e, { src, fps = 15, width = 480, trim = null,
     const geo = frameChain(Number(fps), w, crop, Number(speed));
     const baseChain = joinF(geo, barFilters(bars).join(',')); // geo + black bars (background)
     let filterArgs;
-    let stickerArgs = [];
-    if (ov && ov.hasStickers) {
-      stickerArgs = ov.stickerArgs;
-      const { segs, last } = buildLayerGraph('base', ov.nodes, 1); // input 0 = src, 1.. = stickers
+    let inputArgs = [];
+    if (ov && ov.hasInputs) {
+      inputArgs = ov.inputArgs;
+      const { segs, last } = buildLayerGraph('base', ov.nodes, 1); // input 0 = src, 1.. = stickers/webcam
       filterArgs = ['-filter_complex', `[0:v]${baseChain}[base];${segs.join(';')};${paletteSplit(last)}`];
     } else {
       const drawtexts = ov ? ov.nodes.filter((n) => n.kind === 'text').map((n) => n.drawtext) : [];
       filterArgs = ['-vf', joinF(baseChain, drawtexts.join(','), paletteSplit(''))];
     }
-    const args = ['-y', ...preInput, '-i', src, ...stickerArgs, ...postInput, ...filterArgs, '-loop', '0', out];
+    const args = ['-y', ...preInput, '-i', src, ...inputArgs, ...postInput, ...filterArgs, '-loop', '0', out];
 
     let proc;
     try {
@@ -1219,8 +1288,8 @@ ipcMain.handle('gif/add-text', (_e, { src, layers = [], bars = null }) => {
     if (!ov && !bf.length) { resolve({ ok: false, error: 'nothing to add' }); return; }
     const capDir = ov ? ov.capDir : null;
     const nodes = ov ? ov.nodes : [];
-    const stickerArgs = ov ? ov.stickerArgs : [];
-    const hasStickers = ov ? ov.hasStickers : false;
+    const inputArgs = ov ? ov.inputArgs : [];
+    const hasStickers = ov ? ov.hasInputs : false;
     const cleanupTmp = () => { if (capDir) { try { fs.rmSync(capDir, { recursive: true, force: true }); } catch { /* ignore */ } } };
 
     const out = path.join(path.dirname(src), `${path.basename(src).replace(/\.gif$/i, '')}-edit-${Date.now()}.gif`);
@@ -1237,7 +1306,7 @@ ipcMain.handle('gif/add-text', (_e, { src, layers = [], bars = null }) => {
     }
     let proc;
     try {
-      proc = spawn(ffmpegPath, ['-y', '-i', src, ...stickerArgs, ...filterArgs, '-loop', '0', out], capDir ? { cwd: capDir } : undefined);
+      proc = spawn(ffmpegPath, ['-y', '-i', src, ...inputArgs, ...filterArgs, '-loop', '0', out], capDir ? { cwd: capDir } : undefined);
     } catch (e) { cleanupTmp(); resolve({ ok: false, error: e.message }); return; }
     let err = '';
     proc.stderr.on('data', (d) => { err += d.toString(); });

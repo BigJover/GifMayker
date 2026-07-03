@@ -61,6 +61,8 @@ let skDrag = null;     // {s, r} while dragging
 let skResize = null;   // {s, r, dir, box, aspect} while resizing
 let skSeq = 0;
 const SK_GRIPS = ['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'];
+// PiP replay: the webcam file that backs the webcam video-sticker (null otherwise).
+let pipWebcamPath = null;
 
 // Unified paint order for ALL overlay items (captions + stickers), bottom→top.
 // DOM z-index and the ffmpeg bake order both follow this, so text and images
@@ -344,7 +346,7 @@ async function makeGif() {
   $('gifout').style.color = '';
   let res;
   try {
-    res = await window.gifApp.toGif({ src: lastSavedPath, fps, width, trim, crop, speed, outSeconds, layers: layerPayload(), bars });
+    res = await window.gifApp.toGif({ src: lastSavedPath, fps, width, trim, crop, speed, outSeconds, layers: layerPayload(), bars, webcamSrc: pipWebcamPath });
   } catch (e) {
     res = { ok: false, error: e.message };
   }
@@ -381,6 +383,7 @@ function resetToPicker() {
   clearCaptions();
   clearStickers();
   clearBars();
+  pipWebcamPath = null; // a plain capture/replay has no webcam overlay
   $('preview').src = '';
   $('preview').srcObject = null;
   $('preview').style.display = '';
@@ -842,7 +845,9 @@ function layerPayload() {
       if (!String(item.text || '').trim().length) continue;
       payload.push({ kind: 'text', text: item.text, fx: item.fx, fy: item.fy, size: Math.round(item.sizeFrac * out.h), color: item.color });
     } else if (stickers.includes(item)) {
-      payload.push({ kind: 'sticker', path: item.src, fx: item.fx, fy: item.fy, w: Math.max(1, Math.round(item.wFrac * out.w)), h: Math.max(1, Math.round(item.hFrac * out.h)) });
+      const box = { fx: item.fx, fy: item.fy, w: Math.max(1, Math.round(item.wFrac * out.w)), h: Math.max(1, Math.round(item.hFrac * out.h)) };
+      if (item.kind === 'webcam') payload.push({ kind: 'webcam', ...box }); // webcam video overlay
+      else payload.push({ kind: 'sticker', path: item.src, ...box });
     }
   }
   return payload;
@@ -912,6 +917,38 @@ function addSticker(src) {
   el.addEventListener('mousedown', (e) => startStickerDrag(e, s));
   $('overlayLayer').appendChild(el);
   s.el = el; s.img = img;
+  stickers.push(s);
+  zorder.push(s); // newest on top
+  selectSticker(s);
+}
+
+// The PiP webcam is a "video sticker": same drag/resize/z-order machinery as an
+// image sticker, but the element is a looping <video> playing the webcam clip and
+// it's flagged kind:'webcam' so the export composites the webcam VIDEO input.
+function addWebcamSticker(src) {
+  const s = { id: ++skSeq, kind: 'webcam', src, fx: 0.82, fy: 0.82, wFrac: 0.28, hFrac: 0.28, natW: 0, natH: 0 };
+  const el = document.createElement('div');
+  el.className = 'sticker webcam';
+  const vid = document.createElement('video');
+  vid.muted = true; vid.loop = true; vid.autoplay = true; vid.playsInline = true; vid.draggable = false;
+  vid.addEventListener('loadedmetadata', () => {
+    s.natW = vid.videoWidth; s.natH = vid.videoHeight;
+    const r = outputRegion();
+    if (s.natW && r.H) s.hFrac = (s.wFrac * r.W) * (s.natH / s.natW) / r.H; // start at natural aspect
+    renderStickers();
+  });
+  vid.src = window.gifApp.toFileUrl(src);
+  vid.play().catch(() => {});
+  el.appendChild(vid);
+  for (const dir of SK_GRIPS) {
+    const g = document.createElement('span');
+    g.className = 'skgrip ' + dir;
+    g.addEventListener('mousedown', (e) => startStickerResize(e, s, dir));
+    el.appendChild(g);
+  }
+  el.addEventListener('mousedown', (e) => startStickerDrag(e, s));
+  $('overlayLayer').appendChild(el);
+  s.el = el; s.vid = vid;
   stickers.push(s);
   zorder.push(s); // newest on top
   selectSticker(s);
@@ -1220,6 +1257,22 @@ function loadClip(file) {
   $('hint').textContent = 'Replay loaded — trim/crop, then make your GIF.';
 }
 window.gifApp.onLoadClip(loadClip);
+
+// A PiP replay: load the screen as the base clip, then add the webcam as a movable
+// video sticker once the editor has laid out (initEditor also runs on the same
+// loadedmetadata; the setTimeout lets it finish first so the region exists).
+function loadPip({ screen, webcam }) {
+  loadClip(screen);          // resetToPicker clears pipWebcamPath; set it after
+  pipWebcamPath = webcam || null;
+  if (!pipWebcamPath) return;
+  const cam = pipWebcamPath;
+  const v = $('preview');
+  const add = () => setTimeout(() => addWebcamSticker(cam), 0);
+  if (v.readyState >= 1) add();
+  else v.addEventListener('loadedmetadata', add, { once: true });
+  $('hint').textContent = 'Replay loaded — drag/resize your webcam, trim/crop, then make your GIF.';
+}
+window.gifApp.onLoadPip(loadPip);
 
 // ---- wire buttons ----
 $('homeBtn').addEventListener('click', () => {

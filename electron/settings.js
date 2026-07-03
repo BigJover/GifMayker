@@ -18,8 +18,11 @@ const DEFAULTS = {
     enabled: false,
     seconds: 30,
     displayId: null, // which monitor to record; null = primary/first
-    mode: 'screen',  // 'screen' = capture a monitor, 'webcam' = capture the camera
-    deviceId: null,  // which webcam in 'webcam' mode; null = default camera
+    mode: 'screen',  // 'screen' = a monitor, 'webcam' = the camera, 'pip' = screen + webcam overlay
+    deviceId: null,  // which webcam in 'webcam'/'pip' mode; null = default camera
+    // Picture-in-picture (streamer-cam) layout for 'pip' mode: which corner the
+    // webcam box sits in, and its width as a fraction of the screen frame.
+    pip: { corner: 'br', size: 0.25 }, // corner: tl|tr|bl|br
   },
   // Custom color theme. Each field is a hex string the user picked from the
   // color wheel, or null = use the built-in "Maykr" gold defaults from
@@ -42,6 +45,7 @@ function load() {
     cache = { ...DEFAULTS, ...disk };
     cache.hotkeys = { ...DEFAULTS.hotkeys, ...(disk.hotkeys || {}) };
     cache.replay = { ...DEFAULTS.replay, ...(disk.replay || {}) };
+    cache.replay.pip = { ...DEFAULTS.replay.pip, ...(disk.replay && disk.replay.pip) };
     cache.theme = { ...DEFAULTS.theme, ...(disk.theme || {}) };
   } catch {
     cache = JSON.parse(JSON.stringify(DEFAULTS));

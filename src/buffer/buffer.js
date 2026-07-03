@@ -1,18 +1,21 @@
 // Instant Replay buffer (Phase 2) — runs in a hidden window.
-// Continuously records the screen in short self-contained segments and keeps
-// only the last N seconds worth (a ring buffer). On "save", it flushes the
-// current segment and hands all kept segments to main to stitch + open.
+// Continuously records in short self-contained segments and keeps only the last
+// N seconds worth (a ring buffer). On "save", it flushes the current segment and
+// hands all kept segments to main to stitch + open.
+//
+// Sources: 'screen' (a monitor), 'webcam' (the camera), or 'pip' (screen AND
+// webcam recorded as TWO SEPARATE tracks). For PiP nothing is composited here —
+// both tracks are saved as separate files and the webcam becomes a movable video
+// overlay ("video sticker") in the editor, composited at GIF-export time.
 //
 // Why segments: a WebM stream isn't trimmable from the front (only the first
 // chunk has the header), so we record discrete clips and keep the recent ones.
 
 const SEG_MS = 3000; // length of each rolling segment
-let stream = null;
-let recorder = null;
-let segments = [];   // array of complete webm Blobs
+let tracks = [];     // [{ name, stream, recorder, segments, _flush }]
 let keepSegs = 11;   // ~seconds/SEG + 1
 let running = false;
-let saveRequested = false;
+let saving = false;
 
 function pickMime() {
   for (const m of ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']) {
@@ -34,92 +37,137 @@ function camGumMessage(e, isWebcam) {
   return (e && e.message) || name || 'unknown error';
 }
 
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function screenConstraints(sourceId) {
+  return {
+    audio: false,
+    video: {
+      mandatory: {
+        chromeMediaSource: 'desktop',
+        chromeMediaSourceId: sourceId,
+        maxWidth: 1280, maxHeight: 720, maxFrameRate: 30, // lighter than capture
+      },
+    },
+  };
+}
+function webcamConstraints(deviceId) {
+  return {
+    audio: false,
+    video: {
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 },
+    },
+  };
+}
+
+// Grab the webcam with a clean open → close → reopen cycle: it resets a stuck
+// pipeline (left by a crash or another app grabbing it) so the camera delivers
+// real frames instead of black. If it's genuinely busy, the first open throws.
+async function grabWebcamFresh(deviceId) {
+  const probe = await navigator.mediaDevices.getUserMedia(webcamConstraints(deviceId));
+  probe.getTracks().forEach((t) => t.stop());
+  await wait(350); // let the device fully release
+  return navigator.mediaDevices.getUserMedia(webcamConstraints(deviceId));
+}
+
+function addTrack(name, stream) {
+  tracks.push({ name, stream, recorder: null, segments: [], _flush: null });
+}
+
 async function startBuffer({ mode, sourceId, deviceId, seconds }) {
   if (running) return;
-  const isWebcam = mode === 'webcam';
-  if (!isWebcam && !sourceId) { console.error('[buffer] no source id'); return; }
   keepSegs = Math.ceil((seconds || 30) / (SEG_MS / 1000)) + 1;
-  const constraints = isWebcam
-    ? {
-        audio: false,
-        video: {
-          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-          width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 },
-        },
-      }
-    : {
-        audio: false,
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: sourceId,
-            maxWidth: 1280, maxHeight: 720, maxFrameRate: 30, // lighter than capture
-          },
-        },
-      };
+  tracks = [];
   try {
-    if (isWebcam) {
-      // Restart the camera before recording: a clean open → close → reopen
-      // cycle resets a stuck pipeline (left by a crash or another app grabbing
-      // it) so it delivers real frames instead of black. If the camera is
-      // genuinely busy/unavailable, this first open throws → handled below.
-      const probe = await navigator.mediaDevices.getUserMedia(constraints);
-      probe.getTracks().forEach((t) => t.stop());
-      await new Promise((r) => setTimeout(r, 350)); // let the device fully release
+    if (mode === 'pip') {
+      // Screen is required; the webcam is best-effort. If the camera is busy
+      // (Discord on Windows), record screen-only and tell the user, rather than
+      // failing the whole replay.
+      if (!sourceId) throw new Error('no screen source');
+      addTrack('screen', await navigator.mediaDevices.getUserMedia(screenConstraints(sourceId)));
+      try {
+        addTrack('webcam', await grabWebcamFresh(deviceId));
+      } catch (e) {
+        console.error('[buffer] pip webcam failed:', e.name, e.message);
+        try { window.gifApp.replayNotice('Your webcam is in use — recording screen only for this replay.'); } catch { /* ignore */ }
+      }
+    } else if (mode === 'webcam') {
+      addTrack('webcam', await grabWebcamFresh(deviceId));
+    } else {
+      if (!sourceId) { console.error('[buffer] no source id'); try { window.gifApp.replayArmed(false); } catch { /* ignore */ } return; }
+      addTrack('screen', await navigator.mediaDevices.getUserMedia(screenConstraints(sourceId)));
     }
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
   } catch (e) {
-    console.error('[buffer] getUserMedia failed:', e.name, e.message);
-    try { window.gifApp.replayError(camGumMessage(e, isWebcam)); } catch { /* ignore */ }
+    console.error('[buffer] start failed:', e.name, e.message);
+    try { window.gifApp.replayError(camGumMessage(e, mode !== 'screen')); } catch { /* ignore */ }
     try { window.gifApp.replayArmed(false); } catch { /* ignore */ }
+    cleanup();
     return;
   }
   running = true;
-  cycle();
+  tracks.forEach((t) => cycleTrack(t));
   // Tell main the buffer is genuinely recording (so Save Replay knows it can
   // actually flush a clip, vs. a buffer that exists but never grabbed a source).
   try { window.gifApp.replayArmed(true); } catch { /* ignore */ }
-  console.log('[buffer] armed;', isWebcam ? 'webcam' : 'screen', 'keeping', keepSegs, 'segments');
+  console.log('[buffer] armed;', mode, 'tracks:', tracks.map((t) => t.name).join('+'), 'keeping', keepSegs, 'segments');
 }
 
-function cycle() {
-  if (!running || !stream) return;
+// One rolling recorder per track; self-restarts every SEG_MS to keep discrete,
+// front-trimmable segments.
+function cycleTrack(t) {
+  if (!running || !t.stream) return;
   const chunks = [];
   const mime = pickMime();
-  recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-  recorder.onstop = async () => {
+  t.recorder = new MediaRecorder(t.stream, mime ? { mimeType: mime } : undefined);
+  t.recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  t.recorder.onstop = () => {
     if (chunks.length) {
-      segments.push(new Blob(chunks, { type: 'video/webm' }));
-      while (segments.length > keepSegs) segments.shift();
+      t.segments.push(new Blob(chunks, { type: 'video/webm' }));
+      while (t.segments.length > keepSegs) t.segments.shift();
     }
-    if (saveRequested) {
-      saveRequested = false;
-      try {
-        const bufs = await Promise.all(segments.map((b) => b.arrayBuffer()));
-        await window.gifApp.replaySubmit(bufs);
-      } catch (e) { console.error('[buffer] submit failed:', e.message); }
-    }
-    if (running) cycle();
+    if (t._flush) { const done = t._flush; t._flush = null; done(t.segments.slice()); }
+    if (running) cycleTrack(t);
   };
-  recorder.start();
-  setTimeout(() => { if (recorder && recorder.state !== 'inactive') recorder.stop(); }, SEG_MS);
+  t.recorder.start();
+  setTimeout(() => { if (t.recorder && t.recorder.state !== 'inactive') t.recorder.stop(); }, SEG_MS);
+}
+
+// Flush a track's in-progress segment so the saved clip includes up to "now",
+// resolving with the segment list once the recorder finalises.
+function flushTrack(t) {
+  return new Promise((res) => {
+    if (t.recorder && t.recorder.state !== 'inactive') { t._flush = res; t.recorder.stop(); }
+    else res(t.segments.slice());
+  });
+}
+
+function cleanup() {
+  tracks.forEach((t) => { try { if (t.stream) t.stream.getTracks().forEach((x) => x.stop()); } catch { /* ignore */ } });
+  tracks = [];
 }
 
 function stopBuffer() {
   running = false;
-  saveRequested = false;
-  try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch { /* ignore */ }
-  if (stream) stream.getTracks().forEach((t) => t.stop());
-  stream = null;
-  segments = [];
+  saving = false;
+  tracks.forEach((t) => { try { if (t.recorder && t.recorder.state !== 'inactive') t.recorder.stop(); } catch { /* ignore */ } });
+  cleanup();
 }
 
-// Flush the in-progress segment so the saved clip includes up to "now".
-function saveBuffer() {
-  if (!running) return;
-  saveRequested = true;
-  if (recorder && recorder.state !== 'inactive') recorder.stop();
+// Flush every track and hand main a { trackName: [ArrayBuffer, …] } payload
+// (one entry per track — 'screen', 'webcam', or both for PiP).
+async function saveBuffer() {
+  if (!running || saving) return;
+  saving = true;
+  try {
+    const payload = {};
+    await Promise.all(tracks.map(async (t) => {
+      const segs = await flushTrack(t);
+      payload[t.name] = await Promise.all(segs.map((b) => b.arrayBuffer()));
+    }));
+    await window.gifApp.replaySubmit(payload);
+  } catch (e) { console.error('[buffer] submit failed:', e.message); }
+  saving = false;
 }
 
 window.gifApp.onReplayStart(startBuffer);

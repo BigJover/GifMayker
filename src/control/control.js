@@ -143,7 +143,7 @@ function applyReplayState(r) {
     t.setAttribute('aria-pressed', r.enabled ? 'true' : 'false');
   }
   const secs = $('replaySeconds'); if (secs) secs.value = String(r.seconds);
-  const mode = r.mode === 'webcam' ? 'webcam' : 'screen';
+  const mode = r.mode === 'webcam' ? 'webcam' : r.mode === 'pip' ? 'pip' : 'screen';
   const modeSel = $('replayMode'); if (modeSel) modeSel.value = mode;
   applyReplayMode(mode);
   const sub = $('replaySub'); if (sub) sub.textContent = `Always recording — save the last ${r.seconds}s`;
@@ -187,16 +187,21 @@ function renderReplayStatus(st) {
   }
 }
 
-// Show the right source picker (monitor vs camera) and adjust the note.
+// Show the right source pickers per mode and adjust the note.
+//   screen → monitor only · webcam → camera only · pip → monitor + camera + layout
 function applyReplayMode(mode) {
   const webcam = mode === 'webcam';
-  const screenRow = $('replayScreenRow'); if (screenRow) screenRow.style.display = webcam ? 'none' : '';
-  const camRow = $('replayCameraRow'); if (camRow) camRow.style.display = webcam ? '' : 'none';
+  const pip = mode === 'pip';
+  const show = (id, on) => { const el = $(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('replayScreenRow', !webcam);        // screen + pip need a monitor
+  show('replayCameraRow', webcam || pip);  // webcam + pip need a camera
   const note = $('replayNote');
-  if (note) note.textContent = webcam
-    ? 'When on, GifMayker constantly records your webcam (the camera light stays on). Press the hotkey to save the last clip as a GIF.'
-    : 'When on, GifMayker constantly records the screen. Press the hotkey to save the last clip and edit it into a GIF.';
-  if (webcam) populateCameras();
+  if (note) note.textContent = pip
+    ? 'When on, GifMayker records the screen and your webcam. Save a clip, then drag/resize the webcam anywhere in the editor before making the GIF.'
+    : webcam
+      ? 'When on, GifMayker constantly records your webcam (the camera light stays on). Press the hotkey to save the last clip as a GIF.'
+      : 'When on, GifMayker constantly records the screen. Press the hotkey to save the last clip and edit it into a GIF.';
+  if (webcam || pip) populateCameras();
 }
 
 // List cameras for the dropdown. Labels need camera permission; before that

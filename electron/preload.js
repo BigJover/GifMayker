@@ -66,11 +66,13 @@ contextBridge.exposeInMainWorld('gifApp', {
   setReplayScreen: (displayId) => ipcRenderer.invoke('replay/set-screen', displayId),
   setReplayMode: (mode) => ipcRenderer.invoke('replay/set-mode', mode),
   setReplayCamera: (deviceId) => ipcRenderer.invoke('replay/set-camera', deviceId),
+  setReplayPip: (patch) => ipcRenderer.invoke('replay/set-pip', patch),
   replaySubmit: (buffers) => ipcRenderer.invoke('replay/submit', buffers),
   onReplayStart: (cb) => ipcRenderer.on('replay/start', (_e, opts) => cb(opts)),
   onReplayStop: (cb) => ipcRenderer.on('replay/stop', () => cb()),
   onReplaySave: (cb) => ipcRenderer.on('replay/save', () => cb()),
   onLoadClip: (cb) => ipcRenderer.on('capture/load-clip', (_e, file) => cb(file)),
+  onLoadPip: (cb) => ipcRenderer.on('capture/load-pip', (_e, d) => cb(d)),
   openScreenPrefs: () => ipcRenderer.invoke('capture/open-screen-prefs'),
   getSources: () => ipcRenderer.invoke('capture/sources'),
   saveCapture: (arrayBuffer) => ipcRenderer.invoke('capture/save', arrayBuffer),
@@ -87,6 +89,7 @@ contextBridge.exposeInMainWorld('gifApp', {
     }
   },
   replayError: (msg) => ipcRenderer.invoke('replay/error', msg),
+  replayNotice: (msg) => ipcRenderer.invoke('replay/notice', msg),
   replayArmed: (ok) => ipcRenderer.invoke('replay/armed', ok),
   // Free the camera from webcam Instant Replay before a webcam capture grabs it.
   suspendReplayForCapture: () => ipcRenderer.invoke('replay/suspend-for-capture'),
