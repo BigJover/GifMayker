@@ -82,11 +82,41 @@
     applyText(theme.text || null);
   }
 
+  // Custom background image: fill the whole window (cover, centered) behind the
+  // UI, with a scrim on top for legibility. Any size is allowed — small/odd
+  // images are simply scaled up to fill, so they may look soft. null clears it.
+  function whenBody(fn) {
+    if (document.body) fn();
+    else document.addEventListener('DOMContentLoaded', fn, { once: true });
+  }
+  function applyBgImage(url) {
+    whenBody(() => {
+      const b = document.body;
+      if (url) {
+        b.style.backgroundImage = `linear-gradient(var(--bg-scrim), var(--bg-scrim)), url("${url}")`;
+        b.style.backgroundSize = 'cover';
+        b.style.backgroundPosition = 'center';
+        b.style.backgroundRepeat = 'no-repeat';
+        b.style.backgroundAttachment = 'fixed';
+      } else {
+        b.style.backgroundImage = '';
+        b.style.backgroundSize = '';
+        b.style.backgroundPosition = '';
+        b.style.backgroundRepeat = '';
+        b.style.backgroundAttachment = '';
+      }
+    });
+  }
+
   // Exposed so the control panel can preview live while dragging the wheel.
-  window.__theme = { apply, DEFAULTS };
+  window.__theme = { apply, applyBgImage, DEFAULTS };
 
   if (window.gifApp && window.gifApp.getTheme) {
     window.gifApp.getTheme().then(apply).catch(() => {});
     window.gifApp.onThemeChanged(apply);
+  }
+  if (window.gifApp && window.gifApp.getBgImage) {
+    window.gifApp.getBgImage().then(applyBgImage).catch(() => {});
+    window.gifApp.onBgChanged(applyBgImage);
   }
 })();

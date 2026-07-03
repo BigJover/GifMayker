@@ -781,6 +781,29 @@ function clearCaptions() {
   selectCaption(null);
 }
 
+// --- Snap guides: soft-snap a dragged overlay's center to the output region's
+// center + rule-of-thirds lines, flashing an alignment guide while it holds. ---
+const SNAP_TARGETS = [1 / 3, 0.5, 2 / 3];
+const SNAP_TOL = 0.02; // within 2% of a line → snap onto it
+function snapAxis(v) {
+  for (const t of SNAP_TARGETS) if (Math.abs(v - t) <= SNAP_TOL) return { v: t, on: true };
+  return { v, on: false };
+}
+// sx/sy = snapped fraction to draw a guide at, or null to hide that axis' guide.
+function showGuides(sx, sy) {
+  const r = outputRegion();
+  const gv = $('capGuideV'), gh = $('capGuideH');
+  if (gv) {
+    if (sx == null) gv.classList.remove('on');
+    else { gv.style.left = (r.L + sx * r.W) + 'px'; gv.style.top = r.T + 'px'; gv.style.height = r.H + 'px'; gv.classList.add('on'); }
+  }
+  if (gh) {
+    if (sy == null) gh.classList.remove('on');
+    else { gh.style.top = (r.T + sy * r.H) + 'px'; gh.style.left = r.L + 'px'; gh.style.width = r.W + 'px'; gh.classList.add('on'); }
+  }
+}
+function hideGuides() { $('capGuideV')?.classList.remove('on'); $('capGuideH')?.classList.remove('on'); }
+
 function startCapDrag(e, c) {
   e.preventDefault();
   e.stopPropagation();
@@ -794,13 +817,16 @@ function onCapDrag(e) {
   if (!capDrag) return;
   const vp = $('viewport').getBoundingClientRect();
   const r = capDrag.r;
-  capDrag.c.fx = Math.max(0, Math.min(1, (e.clientX - vp.left - r.L) / r.W));
-  capDrag.c.fy = Math.max(0, Math.min(1, (e.clientY - vp.top - r.T) / r.H));
+  const ax = snapAxis(Math.max(0, Math.min(1, (e.clientX - vp.left - r.L) / r.W)));
+  const ay = snapAxis(Math.max(0, Math.min(1, (e.clientY - vp.top - r.T) / r.H)));
+  capDrag.c.fx = ax.v; capDrag.c.fy = ay.v;
+  showGuides(ax.on ? ax.v : null, ay.on ? ay.v : null);
   renderCaptions();
 }
 
 function endCapDrag() {
   capDrag = null;
+  hideGuides();
   document.removeEventListener('mousemove', onCapDrag);
   document.removeEventListener('mouseup', endCapDrag);
 }
@@ -928,13 +954,16 @@ function onStickerDrag(e) {
   if (!skDrag) return;
   const vp = $('viewport').getBoundingClientRect();
   const r = skDrag.r;
-  skDrag.s.fx = Math.max(0, Math.min(1, (e.clientX - vp.left - r.L) / r.W));
-  skDrag.s.fy = Math.max(0, Math.min(1, (e.clientY - vp.top - r.T) / r.H));
+  const ax = snapAxis(Math.max(0, Math.min(1, (e.clientX - vp.left - r.L) / r.W)));
+  const ay = snapAxis(Math.max(0, Math.min(1, (e.clientY - vp.top - r.T) / r.H)));
+  skDrag.s.fx = ax.v; skDrag.s.fy = ay.v;
+  showGuides(ax.on ? ax.v : null, ay.on ? ay.v : null);
   renderStickers();
 }
 
 function endStickerDrag() {
   skDrag = null;
+  hideGuides();
   document.removeEventListener('mousemove', onStickerDrag);
   document.removeEventListener('mouseup', endStickerDrag);
 }

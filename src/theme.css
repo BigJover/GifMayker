@@ -41,6 +41,10 @@
   --warn-text:     #fde68a;
   --warn-border:   #6b5a18;
   --warn-bg:       #2a2410;
+  --ok:            #34d399;  /* healthy status dot */
+  --warn-dot:      #f59e0b;  /* attention status dot */
+  --flash:         #241d12;  /* transient row-flash highlight */
+  --bg-scrim:      rgba(15, 13, 9, 0.62);  /* darken over a custom background image so text stays legible */
 
   /* type */
   --font: 'Fira Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -102,6 +106,14 @@ footer .spacer { margin-left: auto; }
    GifBoard edit modal. Text (.txtcap) and stickers (.sticker) live in the SAME
    overlay container (.overlaylayer) so per-element z-index interleaves them. */
 .overlaylayer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 5; }
+
+/* snap-alignment guides — flashed while dragging a caption/sticker onto the
+   region's center or rule-of-thirds lines; sit above every overlay. */
+.snapguides { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 7; }
+.snapguides .gv, .snapguides .gh { position: absolute; background: var(--accent); opacity: 0; transition: opacity .08s; }
+.snapguides .gv { width: 1px; top: 0; height: 100%; }
+.snapguides .gh { height: 1px; left: 0; width: 100%; }
+.snapguides .gv.on, .snapguides .gh.on { opacity: .9; }
 
 /* black letterbox bars (background for readable text) — sit above the media but
    below the text/sticker overlay layer. Drag a bar's inner edge to resize. */

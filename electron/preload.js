@@ -5,6 +5,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('gifApp', {
   getVersion: () => ipcRenderer.invoke('app/version'),
 
+  // Update banner: is a newer release out, and open it in the browser.
+  checkUpdate: () => ipcRenderer.invoke('update/check'),
+  openUpdate: () => ipcRenderer.invoke('update/open'),
+  // Main → renderer: re-poll for updates (fired each time the panel is reopened).
+  onUpdateRecheck: (cb) => ipcRenderer.on('update/recheck', () => cb()),
+
   // Hotkeys
   getHotkeys: () => ipcRenderer.invoke('hotkeys/get'),
   setHotkey: (action, accelerator) => ipcRenderer.invoke('hotkeys/set', { action, accelerator }),
@@ -87,6 +93,12 @@ contextBridge.exposeInMainWorld('gifApp', {
   getTheme: () => ipcRenderer.invoke('theme/get'),
   setTheme: (patch) => ipcRenderer.invoke('theme/set', patch),
   onThemeChanged: (cb) => ipcRenderer.on('theme/changed', (_e, theme) => cb(theme)),
+
+  // Custom background image (fills every window; delivered as a data: URL)
+  getBgImage: () => ipcRenderer.invoke('theme/bg-url'),
+  chooseBgImage: () => ipcRenderer.invoke('theme/choose-bg'),
+  clearBgImage: () => ipcRenderer.invoke('theme/clear-bg'),
+  onBgChanged: (cb) => ipcRenderer.on('theme/bg', (_e, url) => cb(url)),
 
   // Save location
   getSaveDir: () => ipcRenderer.invoke('savedir/get'),

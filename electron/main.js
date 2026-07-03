@@ -7,6 +7,7 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, No
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const https = require('https');
 const { spawn } = require('child_process');
 // In a packaged build the binary is unpacked beside the asar (see asarUnpack),
 // so rewrite the path; in dev it resolves to node_modules unchanged.
@@ -37,20 +38,27 @@ const capturesDir = () => {
   return dir;
 };
 
+// Paint new windows in the user's themed background (or the real default --bg)
+// so there's no color flash before the CSS loads. Mirrors theme.css --bg.
+const windowBg = () => { const t = settings.load().theme; return (t && t.bg) || '#13100b'; };
+
 // --- Windows ---
 function createControlWindow() {
   if (controlWin && !controlWin.isDestroyed()) {
     controlWin.show();
     controlWin.focus();
+    // Tray apps only hide the window on close, so control.js doesn't re-run on
+    // reopen — nudge the renderer to re-poll for updates on every reopen.
+    controlWin.webContents.send('update/recheck');
     return;
   }
   controlWin = new BrowserWindow({
     width: 380,
-    height: 568,
+    height: 650,
     resizable: false,
     show: false,
     title: 'GifMayker',
-    backgroundColor: '#0f1117',
+    backgroundColor: windowBg(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -81,7 +89,7 @@ function createCaptureWindow() {
     minHeight: 520,
     show: false,
     title: 'Capture',
-    backgroundColor: '#0f1117',
+    backgroundColor: windowBg(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -131,7 +139,7 @@ function createSoundboardWindow() {
     minHeight: 460,
     show: false,
     title: 'GifBoard',
-    backgroundColor: '#0f1117',
+    backgroundColor: windowBg(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -342,6 +350,65 @@ app.on('will-quit', () => globalShortcut.unregisterAll());
 // --- IPC ---
 ipcMain.handle('app/version', () => app.getVersion());
 
+// --- Update check: poll GitHub Releases for a newer version -------------------
+// Runs in main (not the renderer) so it isn't blocked by the window CSP and so
+// the release URL we hand to shell.openExternal is one WE built, not renderer
+// input. No auto-download/signing — just a one-click "go get the new build".
+const UPDATE_REPO = 'BigJover/GifMayker';
+let latestReleaseUrl = null; // remembered from the last successful check
+
+// Compare dotted versions numerically (leading "v" tolerated). >0 => a newer.
+function cmpVersion(a, b) {
+  const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+// Fetch the latest published (non-draft, non-prerelease) release from GitHub.
+function fetchLatestRelease() {
+  return new Promise((resolve, reject) => {
+    const req = https.get({
+      hostname: 'api.github.com',
+      path: `/repos/${UPDATE_REPO}/releases/latest`,
+      headers: { 'User-Agent': 'GifMayker', Accept: 'application/vnd.github+json' },
+      timeout: 8000,
+    }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); reject(new Error('status ' + res.statusCode)); return; }
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => { try { resolve(JSON.parse(data)); } catch (e) { reject(e); } });
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+  });
+}
+
+// Renderer asks "is there a newer version?". Offline / rate-limited / no-release
+// all resolve to {update:false} so the UI simply shows no banner.
+ipcMain.handle('update/check', async () => {
+  try {
+    const rel = await fetchLatestRelease();
+    const latest = String(rel.tag_name || rel.name || '').replace(/^v/i, '');
+    if (latest && cmpVersion(latest, app.getVersion()) > 0) {
+      latestReleaseUrl = rel.html_url || `https://github.com/${UPDATE_REPO}/releases/latest`;
+      // Grow the fixed-size control window so the banner doesn't crowd the panel.
+      if (controlWin && !controlWin.isDestroyed()) controlWin.setSize(380, 702);
+      return { update: true, version: latest, url: latestReleaseUrl };
+    }
+  } catch { /* no connectivity / no release yet — just don't nag */ }
+  return { update: false };
+});
+
+// Open the release page in the default browser (URL is built by us, above).
+ipcMain.handle('update/open', () => {
+  shell.openExternal(latestReleaseUrl || `https://github.com/${UPDATE_REPO}/releases/latest`);
+  return true;
+});
+
 // Custom color theme: persist the user's picks and live-apply them to every
 // open window (the renderer derives the full token family from each color).
 function broadcastTheme(theme) {
@@ -356,6 +423,60 @@ ipcMain.handle('theme/set', (_e, patch) => {
   settings.save(cfg);
   broadcastTheme(cfg.theme);
   return cfg.theme;
+});
+
+// --- Custom background image (fills every window behind the UI) --------------
+// The chosen file is copied into userData so it survives the original moving.
+// It's delivered to the renderers as a data: URL (not a file:// path) so it
+// works under every window's CSP without granting file:// access.
+const bgDir = () => path.join(app.getPath('userData'), 'background');
+function bgDataUrl() {
+  const p = settings.load().theme.bgImage;
+  if (!p) return null;
+  try {
+    const ext = path.extname(p).slice(1).toLowerCase();
+    const mime = ext === 'jpg' ? 'jpeg' : (ext || 'png');
+    return `data:image/${mime};base64,${fs.readFileSync(p).toString('base64')}`;
+  } catch { return null; } // file vanished → treat as no image
+}
+function broadcastBg() {
+  const url = bgDataUrl();
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('theme/bg', url);
+  }
+}
+ipcMain.handle('theme/bg-url', () => bgDataUrl());
+ipcMain.handle('theme/choose-bg', async () => {
+  const res = await dialog.showOpenDialog({
+    title: 'Choose a background image',
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }],
+  });
+  if (res.canceled || !res.filePaths[0]) return { ok: false };
+  const src = res.filePaths[0];
+  try {
+    fs.mkdirSync(bgDir(), { recursive: true });
+    // Only ever keep one background file — clear any previous choice first.
+    for (const f of fs.readdirSync(bgDir())) fs.rmSync(path.join(bgDir(), f), { force: true });
+    const dest = path.join(bgDir(), 'bg' + (path.extname(src).toLowerCase() || '.png'));
+    fs.copyFileSync(src, dest);
+    const cfg = settings.load();
+    cfg.theme = { ...cfg.theme, bgImage: dest };
+    settings.save(cfg);
+    broadcastBg();
+    return { ok: true, hasImage: true };
+  } catch (e) {
+    console.error('[theme] set background failed:', e);
+    return { ok: false, error: 'copy-failed' };
+  }
+});
+ipcMain.handle('theme/clear-bg', () => {
+  const cfg = settings.load();
+  if (cfg.theme.bgImage) { try { fs.rmSync(cfg.theme.bgImage, { force: true }); } catch { /* already gone */ } }
+  cfg.theme = { ...cfg.theme, bgImage: null };
+  settings.save(cfg);
+  broadcastBg();
+  return { ok: true };
 });
 
 ipcMain.handle('hotkeys/get', () => {

@@ -28,6 +28,7 @@ const DEFAULTS = {
     accent: null, // "gold trim" — accent + highlight borders
     bg: null,     // dark background + the surface/border ramp
     text: null,   // text + the subtext/muted shades
+    bgImage: null, // absolute path to a user-chosen window background image (copied into userData), or null
   },
 };
 

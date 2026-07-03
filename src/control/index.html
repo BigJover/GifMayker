@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
   <title>GifMayker</title>
   <link rel="stylesheet" href="../fonts.css" />
   <link rel="stylesheet" href="../theme.css" />
@@ -53,7 +53,7 @@
       padding: 10px 0; border-top: 1px solid var(--divider); }
     .sp-label { font-size: 12.5px; color: var(--muted-3); }
     .sp-note { font-size: 10.5px; color: var(--muted-4); margin: 10px 2px 0; line-height: 1.45; }
-    .row.flash { background: #241d12; border-color: var(--border-hover); }
+    .row.flash { background: var(--flash); border-color: var(--border-hover); }
     .hint { font-size: 10.5px; color: var(--muted-4); margin: 12px 2px 0; text-align: center; line-height: 1.5; }
     /* custom-color wheels */
     .theme { display: flex; align-items: flex-end; justify-content: center; gap: 14px; margin: 16px 0 2px; }
@@ -66,15 +66,45 @@
     .theme-reset { font-size: 11px; color: var(--muted); background: transparent; border: none;
       cursor: pointer; text-decoration: underline; padding: 0 0 5px; }
     .theme-reset:hover { color: var(--text); }
+    /* preset theme swatches — one click applies a whole palette */
+    .presets { display: flex; justify-content: center; gap: 8px; margin: 12px 0 2px; flex-wrap: wrap; }
+    .preset { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border-strong);
+      cursor: pointer; padding: 0; transition: transform .1s, border-color .1s; }
+    .preset:hover { border-color: var(--border-hover); transform: scale(1.09); }
+    /* custom background image picker */
+    .bgimg { display: flex; align-items: center; gap: 8px; width: 100%; margin: 14px 0 2px; }
+    .bgimg .lbl { font-size: 12px; color: var(--muted-3); }
+    .bgimg .spacer { margin-left: auto; }
+    /* update-available banner (hidden until a newer release is found) */
+    .update { display: none; align-items: center; gap: 10px; width: 100%;
+      padding: 10px 12px; margin: 0 0 16px; border-radius: 11px;
+      border: 1px solid var(--accent); background: var(--accent-soft); }
+    .update.show { display: flex; }
+    .update-txt { font-size: 12px; color: var(--on-accent); }
+    .update-txt b { font-weight: 700; }
+    .update-get { font-size: 11.5px; color: var(--on-accent); background: var(--accent);
+      border: 1px solid var(--accent-hover); border-radius: 8px; padding: 6px 12px;
+      cursor: pointer; font-weight: 600; white-space: nowrap; }
+    .update-get:hover { background: var(--accent-hover); }
+    .update-x { background: transparent; border: none; color: var(--on-accent); font-size: 17px;
+      line-height: 1; cursor: pointer; padding: 0 2px; opacity: .65; }
+    .update-x:hover { opacity: 1; }
     .status { margin-top: auto; font-size: 11px; color: var(--muted); }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-      background: #34d399; margin-right: 6px; vertical-align: middle; }
-    .dot.warn { background: #f59e0b; }
+      background: var(--ok); margin-right: 6px; vertical-align: middle; }
+    .dot.warn { background: var(--warn-dot); }
   </style>
 </head>
 <body>
   <h1>GifMayker</h1>
   <p class="tag">Capture anything → make a GIF → paste it anywhere.</p>
+
+  <div class="update" id="updateBanner">
+    <span class="update-txt">New version <b id="updateVer">v…</b> available</span>
+    <span class="spacer"></span>
+    <button class="update-get" id="updateGet">Download</button>
+    <button class="update-x" id="updateDismiss" title="Dismiss" aria-label="Dismiss">×</button>
+  </div>
 
   <div class="panel">
     <div class="row" id="row-capture">
@@ -155,6 +185,22 @@
       <span>Text</span>
     </label>
     <button class="theme-reset" id="themeReset" title="Reset to default colors">Reset</button>
+  </div>
+
+  <div class="presets" id="presets">
+    <button class="preset" data-a="" data-b="" data-t="" title="Maykr Gold (default)" style="background:linear-gradient(135deg,#d4af37,#13100b)"></button>
+    <button class="preset" data-a="#c0392b" data-b="#160a0a" data-t="#ffffff" title="Crimson" style="background:linear-gradient(135deg,#c0392b,#160a0a)"></button>
+    <button class="preset" data-a="#27ae60" data-b="#0a140e" data-t="#ffffff" title="Emerald" style="background:linear-gradient(135deg,#27ae60,#0a140e)"></button>
+    <button class="preset" data-a="#3aa0e6" data-b="#0a0f16" data-t="#ffffff" title="Ocean" style="background:linear-gradient(135deg,#3aa0e6,#0a0f16)"></button>
+    <button class="preset" data-a="#9b59b6" data-b="#120a16" data-t="#ffffff" title="Violet" style="background:linear-gradient(135deg,#9b59b6,#120a16)"></button>
+    <button class="preset" data-a="#8892a0" data-b="#0f1114" data-t="#ffffff" title="Slate" style="background:linear-gradient(135deg,#8892a0,#0f1114)"></button>
+  </div>
+
+  <div class="bgimg">
+    <span class="lbl">Background image</span>
+    <span class="spacer"></span>
+    <button class="chip" id="bgChoose">Choose…</button>
+    <button class="chip" id="bgClear" style="display:none">Remove</button>
   </div>
 
   <div class="status"><span class="dot" id="dot"></span><span id="statusText">Running in the menu bar</span> · <span id="ver">v…</span></div>

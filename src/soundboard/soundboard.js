@@ -210,6 +210,22 @@ function tUpdateLayerButtons() {
   $('tLayerBack').disabled = i <= 0;
 }
 
+// --- Snap guides: soft-snap a dragged overlay's center to the GIF's center +
+// rule-of-thirds lines, flashing an alignment guide while it holds. ---
+const T_SNAP_TARGETS = [1 / 3, 0.5, 2 / 3];
+const T_SNAP_TOL = 0.02;
+function tSnapAxis(v) {
+  for (const t of T_SNAP_TARGETS) if (Math.abs(v - t) <= T_SNAP_TOL) return { v: t, on: true };
+  return { v, on: false };
+}
+function tShowGuides(sx, sy) {
+  const img = $('textGif'), W = img.clientWidth, H = img.clientHeight;
+  const gv = $('tGuideV'), gh = $('tGuideH');
+  if (gv) { if (sx == null) gv.classList.remove('on'); else { gv.style.left = (sx * W) + 'px'; gv.style.top = '0'; gv.style.height = H + 'px'; gv.classList.add('on'); } }
+  if (gh) { if (sy == null) gh.classList.remove('on'); else { gh.style.top = (sy * H) + 'px'; gh.style.left = '0'; gh.style.width = W + 'px'; gh.classList.add('on'); } }
+}
+function tHideGuides() { $('tGuideV')?.classList.remove('on'); $('tGuideH')?.classList.remove('on'); }
+
 function tStartDrag(e, c) {
   e.preventDefault(); e.stopPropagation(); tSelect(c);
   tdrag = { c, r: $('textGif').getBoundingClientRect() };
@@ -219,11 +235,13 @@ function tStartDrag(e, c) {
 function tOnDrag(e) {
   if (!tdrag) return;
   const r = tdrag.r;
-  tdrag.c.fx = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-  tdrag.c.fy = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+  const ax = tSnapAxis(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
+  const ay = tSnapAxis(Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)));
+  tdrag.c.fx = ax.v; tdrag.c.fy = ay.v;
+  tShowGuides(ax.on ? ax.v : null, ay.on ? ay.v : null);
   tRender();
 }
-function tEndDrag() { tdrag = null; document.removeEventListener('mousemove', tOnDrag); document.removeEventListener('mouseup', tEndDrag); }
+function tEndDrag() { tdrag = null; tHideGuides(); document.removeEventListener('mousemove', tOnDrag); document.removeEventListener('mouseup', tEndDrag); }
 
 function openTextEditor(g) {
   tgif = g; tClear(); tsClear(); tClearBars();
@@ -328,11 +346,13 @@ function tsStartDrag(e, s) {
 function tsOnDrag(e) {
   if (!tsdrag) return;
   const g = tsdrag.g;
-  tsdrag.s.fx = Math.max(0, Math.min(1, (e.clientX - g.left) / g.W));
-  tsdrag.s.fy = Math.max(0, Math.min(1, (e.clientY - g.top) / g.H));
+  const ax = tSnapAxis(Math.max(0, Math.min(1, (e.clientX - g.left) / g.W)));
+  const ay = tSnapAxis(Math.max(0, Math.min(1, (e.clientY - g.top) / g.H)));
+  tsdrag.s.fx = ax.v; tsdrag.s.fy = ay.v;
+  tShowGuides(ax.on ? ax.v : null, ay.on ? ay.v : null);
   tsRender();
 }
-function tsEndDrag() { tsdrag = null; document.removeEventListener('mousemove', tsOnDrag); document.removeEventListener('mouseup', tsEndDrag); }
+function tsEndDrag() { tsdrag = null; tHideGuides(); document.removeEventListener('mousemove', tsOnDrag); document.removeEventListener('mouseup', tsEndDrag); }
 
 // 8-handle resize: corners scale uniformly (aspect-locked), edges stretch one axis.
 function tsStartResize(e, s, dir) {

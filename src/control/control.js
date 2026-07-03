@@ -55,7 +55,9 @@ window.gifApp.onActionFired((kind) => {
 // --- rebinding: click a chip, then press a combo (WIRED FIRST, can't be broken) ---
 let listening = null; // {action, chip} or null
 
-document.querySelectorAll('.chip').forEach((chip) => {
+// Only hotkey chips (which carry a data-action) start a rebind — other .chip
+// styled buttons (e.g. the background image picker) must not trigger listening.
+document.querySelectorAll('.chip[data-action]').forEach((chip) => {
   chip.addEventListener('click', () => startListening(chip));
 });
 
@@ -262,4 +264,53 @@ try {
     preview();
     window.gifApp.setTheme(theme);
   });
+
+  // Preset palettes: one click applies accent+bg+text together (empty = default).
+  document.querySelectorAll('.preset').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      theme = { accent: btn.dataset.a || null, bg: btn.dataset.b || null, text: btn.dataset.t || null };
+      syncInputs();
+      preview();
+      window.gifApp.setTheme(theme);
+    });
+  });
+
+  // Custom background image: pick any image to fill every window (main copies it
+  // in + broadcasts to all windows, so no manual apply here). Remove clears it.
+  const showBgButtons = (has) => {
+    const clear = $('bgClear'); if (clear) clear.style.display = has ? '' : 'none';
+    const choose = $('bgChoose'); if (choose) choose.textContent = has ? 'Change…' : 'Choose…';
+  };
+  (async () => {
+    try { showBgButtons(!!(await window.gifApp.getBgImage())); } catch { /* none */ }
+  })();
+  $('bgChoose')?.addEventListener('click', async () => {
+    try { const r = await window.gifApp.chooseBgImage(); if (r && r.ok) showBgButtons(true); } catch { /* cancelled */ }
+  });
+  $('bgClear')?.addEventListener('click', async () => {
+    try { await window.gifApp.clearBgImage(); showBgButtons(false); } catch { /* ignore */ }
+  });
 } catch (e) { console.error('[control] theme wiring failed:', e); }
+
+// --- Update banner: poll GitHub Releases, offer a one-click download ---------
+// Silent when offline / up to date; only appears when a newer release exists.
+// Re-polls on first load AND every time the panel is reopened from the tray.
+try {
+  const banner = $('updateBanner');
+  async function checkUpdateBanner() {
+    if (!banner) return;
+    try {
+      const r = await window.gifApp.checkUpdate();
+      if (r && r.update) {
+        $('updateVer').textContent = 'v' + r.version;
+        banner.classList.add('show');
+      } else {
+        banner.classList.remove('show'); // up to date → never show
+      }
+    } catch { /* no connectivity — leave banner as-is */ }
+  }
+  checkUpdateBanner();
+  window.gifApp.onUpdateRecheck(checkUpdateBanner);
+  $('updateGet')?.addEventListener('click', () => window.gifApp.openUpdate());
+  $('updateDismiss')?.addEventListener('click', () => banner?.classList.remove('show'));
+} catch (e) { console.error('[control] update wiring failed:', e); }
