@@ -19,6 +19,15 @@
 
     /* source grid */
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+    /* Picture-in-Picture (screen + webcam) toggle above the source grid */
+    .pipbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--border);
+      border-radius: 11px; background: var(--input); }
+    .pipbar.hide { display: none; }
+    .pipcheck { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; user-select: none; }
+    .pipcheck input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+    .pipcheck .cam { color: #5aa9e6; }
+    .pipbar .sel { max-width: 220px; }
     .src { border: 1px solid var(--border); background: var(--input); border-radius: 11px; overflow: hidden; cursor: pointer; transition: border-color .12s, transform .08s; }
     .src:hover { border-color: var(--border-hover); }
     .src.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -159,6 +168,11 @@
       <strong>Camera permission needed.</strong>
       <div>macOS must allow this app to use your webcam. Enable it, then reopen this window.</div>
       <button id="camPermBtn">Open System Settings →</button>
+    </div>
+
+    <div class="pipbar hide" id="pipBar">
+      <label class="pipcheck"><input type="checkbox" id="pipWebcam"><span><span class="cam">◉</span> Add my webcam (Picture-in-Picture)</span></label>
+      <select class="sel" id="pipCam" title="Webcam to record alongside the screen" style="display:none"></select>
     </div>
 
     <div class="grid" id="grid"><div class="muted">Loading sources…</div></div>

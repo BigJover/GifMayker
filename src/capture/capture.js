@@ -64,6 +64,16 @@ const SK_GRIPS = ['nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'];
 // PiP replay: the webcam file that backs the webcam video-sticker (null otherwise).
 let pipWebcamPath = null;
 
+// Manual "Screen + Webcam" capture: when the user records a screen with the PiP
+// webcam toggle on, we run a SECOND MediaRecorder for the camera in parallel and
+// hand both files to the editor's webcam-sticker path (same as an Instant Replay
+// PiP, just recorded here instead of the hidden buffer window).
+let camStream = null;
+let camRecorder = null;
+let camChunks = [];
+let pipMode = false;        // is THIS recording a screen+webcam capture?
+let pipStopWait = 0;        // # of recorders still to fire onstop before we finish
+
 // Unified paint order for ALL overlay items (captions + stickers), bottom→top.
 // DOM z-index and the ffmpeg bake order both follow this, so text and images
 // layer over each other however the user arranges them.
@@ -78,6 +88,12 @@ let barDrag = null;
 async function init() {
   $('permBtn').addEventListener('click', () => window.gifApp.openScreenPrefs());
   $('camPermBtn').addEventListener('click', () => window.gifApp.openCameraPrefs());
+
+  // PiP webcam toggle: reveal the camera picker + refresh the hint.
+  $('pipWebcam').addEventListener('change', () => {
+    $('pipCam').style.display = $('pipWebcam').checked ? '' : 'none';
+    if (selected) selectSource(selected, document.querySelector('.src.selected'));
+  });
 
   const perm = await window.gifApp.capturePermission();
   if (perm === 'denied' || perm === 'restricted') {
@@ -147,14 +163,41 @@ async function loadSources() {
     el.addEventListener('click', () => selectSource({ kind: 'webcam', deviceId: c.deviceId, name: c.label }, el));
     $('grid').appendChild(el);
   }
+
+  // PiP toggle only makes sense when there's BOTH a screen/window and a camera.
+  const pipBar = $('pipBar');
+  if (sources.length && cams.length) {
+    const sel = $('pipCam');
+    sel.innerHTML = '';
+    for (const c of cams) {
+      const o = document.createElement('option');
+      o.value = c.deviceId; o.textContent = c.label;
+      sel.appendChild(o);
+    }
+    pipBar.classList.remove('hide');
+  } else {
+    pipBar.classList.add('hide');
+    $('pipWebcam').checked = false;
+    $('pipCam').style.display = 'none';
+  }
+}
+
+// Is the current selection a screen+webcam (PiP) capture?
+function pipRequested() {
+  return !!(selected && selected.kind === 'screen' && $('pipWebcam').checked && !$('pipBar').classList.contains('hide'));
 }
 
 function selectSource(s, el) {
   selected = s;
   document.querySelectorAll('.src').forEach((n) => n.classList.remove('selected'));
-  el.classList.add('selected');
+  if (el) el.classList.add('selected');
   $('recBtn').disabled = false;
-  $('hint').textContent = `Selected: ${s.name}`;
+  if (pipRequested()) {
+    const camName = $('pipCam').selectedOptions[0]?.textContent || 'webcam';
+    $('hint').textContent = `Selected: ${s.name} + ${camName} (Picture-in-Picture)`;
+  } else {
+    $('hint').textContent = `Selected: ${s.name}`;
+  }
 }
 
 // ---- recording ----
@@ -165,61 +208,66 @@ function pickMime() {
   return '';
 }
 
+function screenConstraints(id) {
+  return { audio: false, video: { mandatory: {
+    chromeMediaSource: 'desktop', chromeMediaSourceId: id,
+    maxFrameRate: 30, maxWidth: 1920, maxHeight: 1080,
+  } } };
+}
+function webcamConstraints(deviceId) {
+  return { audio: false, video: {
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 },
+  } };
+}
+
+// Open a webcam with the restart cycle (open → close → reopen) that clears a
+// stuck pipeline so it delivers real frames instead of black. Throws if the
+// camera is genuinely busy/unavailable — caller decides how to react.
+async function openCamera(deviceId) {
+  const c = webcamConstraints(deviceId);
+  const probe = await navigator.mediaDevices.getUserMedia(c);
+  probe.getTracks().forEach((t) => t.stop());
+  await new Promise((r) => setTimeout(r, 350)); // let the device release
+  return navigator.mediaDevices.getUserMedia(c);
+}
+
 async function startRecording() {
   if (!selected) return;
 
   const isWebcam = selected.kind === 'webcam';
+  pipMode = pipRequested();          // screen + parallel webcam
+  const needCam = isWebcam || pipMode;
+  let camNote = '';
 
-  // Webcam uses the OS Camera permission (separate from Screen Recording).
-  if (isWebcam) {
+  // Camera permission (single-webcam capture OR the PiP secondary camera).
+  if (needCam) {
     const granted = await window.gifApp.askCamera();
     if (!granted) {
-      $('camPerm').classList.add('show');
-      $('hint').textContent = 'Camera access is needed to record your webcam.';
-      return;
+      if (isWebcam) { // webcam is the only source — can't proceed
+        $('camPerm').classList.add('show');
+        $('hint').textContent = 'Camera access is needed to record your webcam.';
+        return;
+      }
+      pipMode = false;               // PiP: fall back to screen-only
+      camNote = 'Webcam permission denied — recording the screen only.';
+    } else {
+      $('camPerm').classList.remove('show');
+      // On Windows the webcam is single-owner — if our own webcam Instant Replay
+      // is holding it in the background, free it first (then wait a beat for the
+      // device to actually release before we open it here).
+      try {
+        const released = await window.gifApp.suspendReplayForCapture();
+        if (released) await new Promise((r) => setTimeout(r, 300));
+      } catch { /* non-fatal */ }
     }
-    $('camPerm').classList.remove('show');
-    // On Windows the webcam is single-owner — if our own webcam Instant Replay
-    // is holding it in the background, free it first (then wait a beat for the
-    // device to actually release before we open it here).
-    try {
-      const released = await window.gifApp.suspendReplayForCapture();
-      if (released) await new Promise((r) => setTimeout(r, 300));
-    } catch { /* non-fatal */ }
   }
 
-  const constraints = isWebcam
-    ? {
-        audio: false,
-        video: {
-          ...(selected.deviceId ? { deviceId: { exact: selected.deviceId } } : {}),
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 },
-        },
-      }
-    : {
-        audio: false,
-        video: {
-          mandatory: {
-            chromeMediaSource: 'desktop',
-            chromeMediaSourceId: selected.id,
-            maxFrameRate: 30,
-            maxWidth: 1920,
-            maxHeight: 1080,
-          },
-        },
-      };
+  // --- acquire the primary stream (webcam capture OR the screen for PiP) ---
   try {
-    if (isWebcam) {
-      // Restart the camera first: a clean open → close → reopen cycle clears a
-      // stuck pipeline so it gives real frames instead of a black screen. A
-      // genuinely busy camera throws on this first open → caught below.
-      const probe = await navigator.mediaDevices.getUserMedia(constraints);
-      probe.getTracks().forEach((t) => t.stop());
-      await new Promise((r) => setTimeout(r, 350)); // let the device release
-    }
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    stream = isWebcam
+      ? await openCamera(selected.deviceId)
+      : await navigator.mediaDevices.getUserMedia(screenConstraints(selected.id));
   } catch (e) {
     console.error('[capture] getUserMedia failed:', e.name, e.message);
     // Show the technical error name in brackets too — a temporary diagnostic so
@@ -229,7 +277,19 @@ async function startRecording() {
     return;
   }
 
-  // Mirror the live self-view for a natural feel (recorded output stays normal).
+  // --- PiP: acquire the webcam alongside the screen; drop it gracefully on failure ---
+  if (pipMode) {
+    try {
+      camStream = await openCamera($('pipCam').value);
+    } catch (e) {
+      console.error('[capture] PiP webcam failed:', e.name, e.message);
+      pipMode = false; camStream = null;
+      camNote = 'Webcam unavailable (in use by another app?) — recording the screen only.';
+    }
+  }
+
+  // Mirror the live self-view only when the PREVIEW shows the webcam (i.e. a
+  // single-webcam capture). For PiP the preview is the screen, so no mirror.
   $('preview').classList.toggle('mirror', isWebcam);
 
   // switch UI to recording stage (hide Back so it can't interrupt a recording)
@@ -239,19 +299,36 @@ async function startRecording() {
   $('copyWrap').classList.remove('show');
   $('copyMenu').classList.remove('show');
   $('grid').style.display = 'none';
+  $('pipBar').classList.add('hide');
   $('stage').classList.add('show');
   $('preview').srcObject = stream;
   $('recBtn').style.display = 'none';
   $('stopBtn').style.display = '';
   $('step').textContent = 'Recording…';
-  $('hint').textContent = 'Recording — auto-stops at 1:00.';
+  $('hint').textContent = camNote
+    ? `${camNote} Auto-stops at 1:00.`
+    : (pipMode ? 'Recording screen + webcam — auto-stops at 1:00.' : 'Recording — auto-stops at 1:00.');
 
-  chunks = [];
   const mimeType = pickMime();
+  chunks = [];
   recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-  recorder.onstop = onRecorderStop;
-  recorder.start();
+
+  if (pipMode) {
+    // Dual recording: a second recorder for the webcam. Both onstop handlers
+    // decrement a shared counter; the last one to fire assembles both files.
+    camChunks = [];
+    camRecorder = new MediaRecorder(camStream, mimeType ? { mimeType } : undefined);
+    camRecorder.ondataavailable = (e) => { if (e.data && e.data.size) camChunks.push(e.data); };
+    pipStopWait = 2;
+    recorder.onstop = onOneStopped;
+    camRecorder.onstop = onOneStopped;
+    recorder.start();
+    camRecorder.start();
+  } else {
+    recorder.onstop = onRecorderStop;
+    recorder.start();
+  }
 
   startTs = Date.now();
   ticker = setInterval(tick, 100);
@@ -271,7 +348,23 @@ function tick() {
 function stopRecording() {
   if (ticker) { clearInterval(ticker); ticker = null; }
   if (recorder && recorder.state !== 'inactive') recorder.stop();
+  if (camRecorder && camRecorder.state !== 'inactive') camRecorder.stop();
   if (stream) { stream.getTracks().forEach((t) => t.stop()); }
+  if (camStream) { camStream.getTracks().forEach((t) => t.stop()); }
+}
+
+// Shared "Captured" stage UI, used by both the single and PiP stop paths.
+function showCapturedStage() {
+  $('step').textContent = 'Captured';
+  $('homeBtn').style.display = '';
+  $('stopBtn').style.display = 'none';
+  $('backBtn').style.display = '';
+  $('gifBtn').style.display = '';
+  $('gifBtn').disabled = !lastSavedPath; // need the file on disk to convert
+  $('gifopts').classList.add('show');
+  $('hint').textContent = `${fmt(Date.now() - startTs)} captured · trim/crop if you like, then make your GIF.`;
+  // Intermediate WebM detail is hidden — users only care about the GIF.
+  $('saved').style.display = 'none';
 }
 
 async function onRecorderStop() {
@@ -300,18 +393,51 @@ async function onRecorderStop() {
   }
 
   lastSavedPath = res ? res.path : null;
+  showCapturedStage();
+}
 
-  $('step').textContent = 'Captured';
-  $('homeBtn').style.display = '';
-  $('stopBtn').style.display = 'none';
-  $('backBtn').style.display = '';
-  $('gifBtn').style.display = '';
-  $('gifBtn').disabled = !lastSavedPath; // need the file on disk to convert
-  $('gifopts').classList.add('show');
-  $('hint').textContent = `${fmt(Date.now() - startTs)} captured · trim/crop if you like, then make your GIF.`;
+// PiP: both recorders share this handler; the last one to stop assembles both
+// files and hands them to the editor's webcam-sticker path.
+function onOneStopped() {
+  if (--pipStopWait > 0) return;
+  onDualStop();
+}
 
-  // Intermediate WebM detail is hidden — users only care about the GIF.
-  $('saved').style.display = 'none';
+async function onDualStop() {
+  const screenBlob = new Blob(chunks, { type: 'video/webm' });
+  const camBlob = new Blob(camChunks, { type: 'video/webm' });
+  lastSavedBlob = screenBlob;
+
+  // Save BOTH files first so pipWebcamPath exists before the editor lays out —
+  // addWebcamSticker (run on the screen clip's loadedmetadata) needs the path.
+  let sres = null, cres = null;
+  try {
+    sres = await window.gifApp.saveCapture(await screenBlob.arrayBuffer());
+  } catch (e) {
+    $('saved').style.display = 'block';
+    $('saved').textContent = `Saved in memory but write failed: ${e.message}`;
+  }
+  try { cres = await window.gifApp.saveCapture(await camBlob.arrayBuffer()); }
+  catch (e) { console.error('[capture] webcam save failed:', e.message); }
+
+  lastSavedPath = sres ? sres.path : null;
+  pipWebcamPath = cres ? cres.path : null;
+
+  // Show the screen as the base clip; add the webcam as a movable video-sticker
+  // once the editor region exists (same as an Instant Replay PiP).
+  $('preview').classList.remove('mirror');
+  $('preview').srcObject = null;
+  $('preview').src = lastSavedPath ? window.gifApp.toFileUrl(lastSavedPath) : URL.createObjectURL(screenBlob);
+  $('preview').muted = true;
+  $('preview').loop = true;
+  $('preview').play().catch(() => {});
+  $('preview').addEventListener('loadedmetadata', () => {
+    initEditor();
+    if (pipWebcamPath) setTimeout(() => addWebcamSticker(pipWebcamPath), 0);
+  }, { once: true });
+
+  showCapturedStage();
+  if (pipWebcamPath) $('hint').textContent = `${fmt(Date.now() - startTs)} captured · drag/resize your webcam, trim/crop, then make your GIF.`;
 }
 
 // ---- GIF conversion (M3) ----
@@ -375,8 +501,10 @@ async function makeGif() {
 }
 
 function resetToPicker() {
-  // Clean up the raw .webm from the previous capture (the GIF is what's kept).
+  // Clean up the raw .webm(s) from the previous capture (the GIF is what's kept).
   if (lastSavedPath && /\.webm$/i.test(lastSavedPath)) window.gifApp.deleteSource(lastSavedPath);
+  if (pipWebcamPath && /\.webm$/i.test(pipWebcamPath)) window.gifApp.deleteSource(pipWebcamPath);
+  camStream = null; camRecorder = null; camChunks = []; pipMode = false;
   selected = null;
   lastSavedBlob = null;
   lastSavedPath = null;
@@ -1277,6 +1405,7 @@ window.gifApp.onLoadPip(loadPip);
 // ---- wire buttons ----
 $('homeBtn').addEventListener('click', () => {
   if (lastSavedPath && /\.webm$/i.test(lastSavedPath)) window.gifApp.deleteSource(lastSavedPath);
+  if (pipWebcamPath && /\.webm$/i.test(pipWebcamPath)) window.gifApp.deleteSource(pipWebcamPath);
   window.gifApp.closeCapture();
 });
 $('recBtn').addEventListener('click', startRecording);
