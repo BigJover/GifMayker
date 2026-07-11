@@ -153,6 +153,8 @@ function createSoundboardWindow() {
 
 // --- Actions a hotkey can trigger ---
 function runAction(kind) {
+  // Flash the matching row in the control window (it listens on action/fired).
+  if (controlWin && !controlWin.isDestroyed()) controlWin.webContents.send('action/fired', kind);
   if (kind === 'capture') {
     createCaptureWindow();
     console.log('[hotkey] capture fired');
@@ -213,7 +215,6 @@ async function armReplay() {
     sourceId: srcId,
     deviceId: replay.deviceId, // used only by 'pip'
     seconds: replay.seconds,
-    pip: replay.pip,           // used only by 'pip'
   });
 }
 
@@ -847,7 +848,6 @@ ipcMain.handle('replay/start-recording', async () => {
 // Returns true if we actually released it (so the renderer can wait a beat for
 // the device to come free before calling getUserMedia).
 ipcMain.handle('replay/suspend-for-capture', () => suspendReplayForCapture());
-ipcMain.handle('replay/reacquire', () => reacquireReplay());
 
 ipcMain.handle('replay/get', () => settings.load().replay);
 
@@ -881,18 +881,6 @@ ipcMain.handle('replay/set-camera', async (_e, deviceId) => {
   settings.save(cfg);
   const usesCamera = cfg.replay.mode === 'webcam' || cfg.replay.mode === 'pip';
   if (cfg.replay.enabled && usesCamera) { disarmReplay(); await armReplay(); }
-  return cfg.replay;
-});
-
-// PiP layout (which corner the webcam sits in + its size). Re-arm when live so
-// the compositor picks up the new layout.
-ipcMain.handle('replay/set-pip', async (_e, patch) => {
-  const cfg = settings.load();
-  const p = patch || {};
-  if (p.corner && ['tl', 'tr', 'bl', 'br'].includes(p.corner)) cfg.replay.pip.corner = p.corner;
-  if (typeof p.size === 'number') cfg.replay.pip.size = Math.max(0.12, Math.min(0.45, p.size));
-  settings.save(cfg);
-  if (cfg.replay.enabled && cfg.replay.mode === 'pip') { disarmReplay(); await armReplay(); }
   return cfg.replay;
 });
 
@@ -996,12 +984,6 @@ ipcMain.handle('capture/open-screen-prefs', () => {
     shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
   }
   return true;
-});
-
-// Webcam uses a SEPARATE macOS permission (Camera, not Screen Recording).
-ipcMain.handle('camera/permission', () => {
-  if (process.platform !== 'darwin') return 'granted';
-  return systemPreferences.getMediaAccessStatus('camera'); // granted | denied | restricted | not-determined
 });
 
 // Prompt for camera access (macOS shows the OS dialog the first time). Resolves

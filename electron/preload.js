@@ -28,7 +28,6 @@ contextBridge.exposeInMainWorld('gifApp', {
   capturePermission: () => ipcRenderer.invoke('capture/permission'),
 
   // Webcam capture (separate macOS Camera permission)
-  cameraPermission: () => ipcRenderer.invoke('camera/permission'),
   askCamera: () => ipcRenderer.invoke('camera/ask'),
   openCameraPrefs: () => ipcRenderer.invoke('camera/open-prefs'),
 
@@ -66,7 +65,6 @@ contextBridge.exposeInMainWorld('gifApp', {
   setReplayScreen: (displayId) => ipcRenderer.invoke('replay/set-screen', displayId),
   setReplayMode: (mode) => ipcRenderer.invoke('replay/set-mode', mode),
   setReplayCamera: (deviceId) => ipcRenderer.invoke('replay/set-camera', deviceId),
-  setReplayPip: (patch) => ipcRenderer.invoke('replay/set-pip', patch),
   replaySubmit: (buffers) => ipcRenderer.invoke('replay/submit', buffers),
   onReplayStart: (cb) => ipcRenderer.on('replay/start', (_e, opts) => cb(opts)),
   onReplayStop: (cb) => ipcRenderer.on('replay/stop', () => cb()),
@@ -93,7 +91,6 @@ contextBridge.exposeInMainWorld('gifApp', {
   replayArmed: (ok) => ipcRenderer.invoke('replay/armed', ok),
   // Free the camera from webcam Instant Replay before a webcam capture grabs it.
   suspendReplayForCapture: () => ipcRenderer.invoke('replay/suspend-for-capture'),
-  reacquireReplay: () => ipcRenderer.invoke('replay/reacquire'),
   toGif: (opts) => ipcRenderer.invoke('capture/to-gif', opts),
   onGifProgress: (cb) => ipcRenderer.on('gif/progress', (_e, pct) => cb(pct)),
 
